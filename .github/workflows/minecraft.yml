@@ -57,12 +57,12 @@ jobs:
 
       - name: Start Web File Manager (Filebrowser on Port 8080)
         run: |
-          echo "📁 Launching Web File Manager..."
-          curl -fsSL https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash || true
-          filebrowser config init -b / || true
-          filebrowser config set --address 0.0.0.0 --port 8080 --root . || true
-          filebrowser users add admin admin123 --perm.admin || true
-          filebrowser &
+          echo "📁 Installing & Launching Web File Manager..."
+          brew install filebrowser || curl -fsSL https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash || true
+          
+          # Launch filebrowser serving current server directory on port 8080
+          filebrowser -a 0.0.0.0 -p 8080 -r . --username admin --password admin123 &
+          sleep 3
           echo "✅ Web File Manager running on port 8080 (user: admin / pass: admin123)"
 
       - name: Start Cloudflare Tunnel & playit.gg Tunnel
