@@ -91,46 +91,42 @@ Then go to **GitHub Actions** → **Minecraft Server 24/7 (14GB macOS)** → cli
 
 ---
 
-## 📁 Managing Server Files Live (2 Ways)
+## 🌐 Complete Guide: Web File Manager (`files.vikashbuilds.in`)
 
-### Method 1: Web File Manager (Recommended — No FileZilla Needed) 🌐
-1. Open **`https://files.vikashbuilds.in`** in your browser.
-2. Login credentials:
-   - **Username:** `admin`
-   - **Password:** `admin123`
-3. Drag-and-drop plugins, upload world folders, edit `server.properties`, and edit files live right in your browser!
+The Web File Manager lets you manage all your Minecraft server files, upload plugins, edit `server.properties`, and download logs directly from your browser without installing anything on your PC.
 
 ---
 
-### Method 2: SFTP / FileZilla / WinSCP 📁
+### Step 1: Add Public Hostname in Cloudflare Zero Trust (One-Time Setup)
 
-> [!WARNING]
-> **Why `mc.vikashbuilds.in:22` timed out:**  
-> `mc.vikashbuilds.in` routes Minecraft traffic (Port 25565). Standard Cloudflare HTTP/TCP proxies do not forward Port 22 on the same subdomain.
+1. Go to **https://one.dash.cloudflare.com** (Cloudflare Zero Trust Dashboard).
+2. In the left sidebar, click **Networks** → **Tunnels**.
+3. Click your active tunnel (e.g. `minecraft-server`).
+4. Click the **Public Hostname** tab → click **Add a public hostname**.
+5. Fill in the details:
+   - **Subdomain:** `files`
+   - **Domain:** `vikashbuilds.in`
+   - **Type:** `HTTP`
+   - **URL:** `localhost:8080`
+6. Click **Save hostname**.
 
-To connect FileZilla / WinSCP, use **playit.gg SFTP** or **Cloudflare SSH Hostname**:
+---
 
-#### Option A: via `playit.gg` (Easiest for FileZilla)
-1. Go to your [playit.gg dashboard](https://playit.gg/account/tunnels).
-2. Click **Add Tunnel** → select **Custom TCP Port 22** (SSH/SFTP).
-3. `playit.gg` will give you a host and custom port (e.g., `sftp-app.ply.gg` and port `34891`).
-4. In FileZilla:
-   - **Host:** `sftp-app.ply.gg` (your playit address)
-   - **Port:** `34891` (your playit assigned port)
-   - **Protocol:** `SFTP`
-   - **Username:** `runner`
-   - **Password:** `Vikash@0436` (or your `SFTP_PASSWORD` secret)
+### Step 2: Access & Log Into the File Manager
 
-#### Option B: via Cloudflare Zero Trust (SSH Hostname)
-1. In Cloudflare Zero Trust → **Public Hostnames**:
-   - Subdomain: `sftp`
-   - Domain: `vikashbuilds.in`
-   - Type: `SSH`
-   - URL: `localhost:22`
-2. Download and install `cloudflared` on your PC.
-3. Edit your local SSH config (`~/.ssh/config`):
-   ```
-   Host sftp.vikashbuilds.in
-     ProxyCommand cloudflared access ssh --hostname %h
-   ```
-4. In FileZilla, connect to Host: `sftp.vikashbuilds.in`, Port: `22`, User: `runner`, Password: `Vikash@0436`.
+1. Open **`https://files.vikashbuilds.in`** in your browser.
+2. Log in with default credentials:
+   - **Username:** `admin`
+   - **Password:** `admin123`
+
+---
+
+### Step 3: How to Use the Web Interface
+
+| Action | How to Do It |
+|---|---|
+| 📤 **Upload Plugins / Files** | Drag & drop any `.jar` plugin or `.yml` file into the browser window (or click the **Upload** button at top right). |
+| ✏️ **Edit Config Files Live** | Click any file (e.g., `server.properties`, `ops.json`, `whitelist.json`) → an inline code editor opens. Make your changes and click **Save** (💾). |
+| 📁 **Upload World Folders** | Click **Upload** → **Upload Directory** → select your local `world/` folder. |
+| 📥 **Download Logs / Backups** | Select any file or folder → click the **Download** (📥) button. |
+| 🔑 **Change Admin Password** | Click **Settings** (gear icon) on the left sidebar → **My Account** → update password and save. |
