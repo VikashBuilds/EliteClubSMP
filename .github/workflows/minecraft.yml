@@ -25,9 +25,9 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Install AWS CLI & Utilities
+      - name: Install Tools (AWS CLI, bore, filebrowser)
         run: |
-          brew install awscli jq filebrowser || true
+          brew install awscli jq bore-cli filebrowser || true
           chmod +x scripts/*.sh
 
       - name: Restore World & Server Files from Cloudflare R2
@@ -46,15 +46,10 @@ jobs:
           # Accept EULA
           echo "eula=true" > eula.txt
 
-          # Copy server.properties to working directory
-          cp -f server.properties server.properties 2>/dev/null || true
-
           # Create plugins directory
           mkdir -p plugins
 
           # Download playit.gg Minecraft Plugin (Java-based, works on any OS)
-          # This replaces the native playit agent that has no macOS ARM64 build
-          # Using direct GitHub releases URL (Hangar API redirects to this same file)
           echo "📥 Downloading playit.gg Minecraft Plugin v0.2.0..."
           PLAYIT_PLUGIN_URL="https://github.com/playit-cloud/playit-minecraft-plugin/releases/download/v0.2.0/playit-minecraft-plugin.jar"
           curl -sL -o plugins/playit-minecraft-plugin.jar "$PLAYIT_PLUGIN_URL"
@@ -68,9 +63,8 @@ jobs:
               echo "✅ playit.gg plugin downloaded and validated ($(du -h plugins/playit-minecraft-plugin.jar | cut -f1))"
             else
               echo "❌ Downloaded file is NOT a valid JAR (size: ${FILE_SIZE}, magic: ${FILE_HEAD})"
-              echo "   Removing corrupted file..."
               rm -f plugins/playit-minecraft-plugin.jar
-              echo "   ⚠️ Server will start without playit tunnel. You can manually upload the plugin via File Manager."
+              echo "   ⚠️ Server will start without playit tunnel."
             fi
           else
             echo "❌ Download failed. Server will start without tunnel."
@@ -78,37 +72,132 @@ jobs:
 
           echo "✅ Server configuration ready!"
 
-      - name: Start Web File Manager (Filebrowser on Port 8080)
-        run: |
-          echo "📁 Launching Web File Manager..."
-          filebrowser -a 0.0.0.0 -p 8080 -r . --username admin --password admin123 &
-          sleep 3
-          echo "✅ Web File Manager running on port 8080 (user: admin / pass: admin123)"
-
-      - name: Start Cloudflare Tunnel (HTTP only — for Web File Manager)
+      - name: Setup SFTP / SSH Server (macOS)
         env:
-          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+          SFTP_PASS: ${{ secrets.SFTP_PASSWORD }}
         run: |
-          echo "🔗 Setting up Cloudflare Tunnel (HTTP File Manager only)..."
+          echo "🔐 Setting up SSH/SFTP Server for FileZilla..."
+          PASS="${SFTP_PASS:-Vikash@0436}"
+          SERVER_DIR="$(pwd)"
 
-          if [ -n "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
-            echo "🌐 Starting Cloudflare Named Tunnel → files.vikashbuilds.in"
-            brew install cloudflared || true
-            cloudflared tunnel run --token "$CLOUDFLARE_TUNNEL_TOKEN" &
-            sleep 5
-            echo "✅ Cloudflare Tunnel active for files.vikashbuilds.in (HTTP → localhost:8080)"
+          # ━━━ Step 1: Set password for the runner user (macOS-specific) ━━━
+          # sysadminctl is the correct tool for macOS password management
+          echo "  → Setting password for user: $USER"
+          sudo sysadminctl -resetPasswordFor "$USER" -newPassword "$PASS" 2>&1 || {
+            echo "  ⚠️ sysadminctl failed. Trying alternative method..."
+            # Alternative: use security command to set password
+            sudo dscl . -passwd "/Users/$USER" "$PASS" 2>&1 || {
+              echo "  ⚠️ dscl also failed. Creating fresh SFTP user..."
+              # Last resort: create a new dedicated SFTP user
+              sudo sysadminctl -addUser mcsftp -password "$PASS" -admin 2>&1 || true
+              sudo ln -sf "$SERVER_DIR" /Users/mcsftp/minecraft 2>/dev/null || true
+              echo "  ℹ️ Created user 'mcsftp' as fallback."
+            }
+          }
+
+          # ━━━ Step 2: Enable Password Authentication in sshd_config ━━━
+          echo "  → Enabling password authentication in SSH config..."
+          SSHD_CONFIG="/etc/ssh/sshd_config"
+
+          # Backup original
+          sudo cp "$SSHD_CONFIG" "${SSHD_CONFIG}.bak" 2>/dev/null || true
+
+          # Enable all password-related auth options
+          sudo sed -i '' 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' "$SSHD_CONFIG"
+          sudo sed -i '' 's/^#*KbdInteractiveAuthentication.*/KbdInteractiveAuthentication yes/' "$SSHD_CONFIG"
+          sudo sed -i '' 's/^#*ChallengeResponseAuthentication.*/ChallengeResponseAuthentication yes/' "$SSHD_CONFIG"
+          sudo sed -i '' 's/^#*UsePAM.*/UsePAM yes/' "$SSHD_CONFIG"
+
+          # If the settings don't exist, append them
+          grep -q "^PasswordAuthentication yes" "$SSHD_CONFIG" || echo "PasswordAuthentication yes" | sudo tee -a "$SSHD_CONFIG" > /dev/null
+          grep -q "^KbdInteractiveAuthentication yes" "$SSHD_CONFIG" || echo "KbdInteractiveAuthentication yes" | sudo tee -a "$SSHD_CONFIG" > /dev/null
+          grep -q "^UsePAM yes" "$SSHD_CONFIG" || echo "UsePAM yes" | sudo tee -a "$SSHD_CONFIG" > /dev/null
+
+          # ━━━ Step 3: Enable and restart SSH daemon ━━━
+          echo "  → Starting SSH service..."
+          sudo systemsetup -setremotelogin on 2>/dev/null || true
+          sudo launchctl stop com.openssh.sshd 2>/dev/null || true
+          sleep 1
+          sudo launchctl start com.openssh.sshd 2>/dev/null || true
+          sudo launchctl load -w /System/Library/LaunchDaemons/ssh.plist 2>/dev/null || true
+          sleep 2
+
+          # ━━━ Step 4: Verify SSH is running ━━━
+          if sudo lsof -i :22 | grep -q LISTEN; then
+            echo "  ✅ SSH/SFTP server is RUNNING on port 22"
           else
-            echo "⚠️ No CLOUDFLARE_TUNNEL_TOKEN set. Web File Manager only accessible locally."
+            echo "  ⚠️ SSH may not be listening. Attempting manual start..."
+            sudo /usr/sbin/sshd -D &
+            sleep 2
           fi
 
           echo ""
-          echo "╔══════════════════════════════════════════════════════════════════╗"
-          echo "║  ⚠️  IMPORTANT: Cloudflare Tunnel does NOT support Minecraft!   ║"
-          echo "║  Minecraft uses raw TCP — Cloudflare only proxies HTTP/HTTPS.   ║"
-          echo "║  The playit.gg plugin handles Minecraft connections instead.    ║"
-          echo "╚══════════════════════════════════════════════════════════════════╝"
+          echo "✅ SFTP ready! User: $USER | Server Dir: $SERVER_DIR"
 
-      - name: Launch Server & Auto-Sync Loop (5 Hours 30 Minutes)
+      - name: Start SFTP Tunnel (bore → FileZilla)
+        run: |
+          echo "🌐 Starting TCP tunnel for SFTP (port 22)..."
+          SERVER_DIR="$(pwd)"
+
+          # Start bore TCP tunnel for port 22 (SFTP/SSH)
+          # bore.pub assigns a random public port — no signup needed!
+          bore local 22 --to bore.pub > /tmp/bore_sftp.log 2>&1 &
+          BORE_SFTP_PID=$!
+          sleep 5
+
+          # Extract the assigned public port from bore output
+          BORE_SFTP_PORT=$(grep -oE "bore\.pub:[0-9]+" /tmp/bore_sftp.log | head -1 | cut -d: -f2 || true)
+          BORE_SFTP_ADDR=$(grep -oE "bore\.pub:[0-9]+" /tmp/bore_sftp.log | head -1 || true)
+
+          if [ -n "$BORE_SFTP_PORT" ]; then
+            echo ""
+            echo "╔══════════════════════════════════════════════════════════════════╗"
+            echo "║  📂 SFTP / FileZilla Connection Details                         ║"
+            echo "╠══════════════════════════════════════════════════════════════════╣"
+            echo "║                                                                  ║"
+            echo "║  Protocol:   SFTP - SSH File Transfer Protocol                   ║"
+            echo "║  Host:       bore.pub                                            ║"
+            echo "║  Port:       $BORE_SFTP_PORT"
+            echo "║  Username:   $USER"
+            echo "║  Password:   (your SFTP_PASSWORD secret, default: Vikash@0436)   ║"
+            echo "║                                                                  ║"
+            echo "║  FileZilla Quick Connect:                                        ║"
+            echo "║    sftp://$USER@bore.pub:$BORE_SFTP_PORT"
+            echo "║                                                                  ║"
+            echo "║  Server Directory: $SERVER_DIR"
+            echo "║                                                                  ║"
+            echo "╚══════════════════════════════════════════════════════════════════╝"
+            echo ""
+
+            # Also save to a file for later reference
+            echo "BORE_SFTP_HOST=bore.pub" > /tmp/sftp_info.txt
+            echo "BORE_SFTP_PORT=$BORE_SFTP_PORT" >> /tmp/sftp_info.txt
+            echo "BORE_SFTP_USER=$USER" >> /tmp/sftp_info.txt
+          else
+            echo "⚠️ bore tunnel may still be connecting. Full log:"
+            cat /tmp/bore_sftp.log || true
+            echo ""
+            echo "The SFTP tunnel will keep retrying in the background."
+          fi
+
+      - name: Start Cloudflare Tunnel (HTTP File Manager backup)
+        env:
+          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+        run: |
+          # Keep filebrowser running as a backup file manager
+          echo "📁 Launching Web File Manager on port 8080..."
+          filebrowser -a 0.0.0.0 -p 8080 -r . --username admin --password admin123 &
+          sleep 2
+
+          if [ -n "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
+            echo "🌐 Starting Cloudflare Tunnel for files.vikashbuilds.in..."
+            brew install cloudflared 2>/dev/null || true
+            cloudflared tunnel run --token "$CLOUDFLARE_TUNNEL_TOKEN" &
+            sleep 5
+            echo "✅ Cloudflare Tunnel started (files.vikashbuilds.in → localhost:8080)"
+          fi
+
+      - name: Launch Minecraft Server & Auto-Backup Loop (5h 30m)
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -119,42 +208,46 @@ jobs:
           bash scripts/start-server.sh &
           SERVER_PID=$!
 
-          # Wait for server to fully start (world gen + plugins load)
-          echo "⏳ Waiting 60 seconds for server + playit plugin to initialize..."
+          # Wait for server + plugins to load
+          echo "⏳ Waiting 60 seconds for server to initialize..."
           sleep 60
 
-          # Print playit.gg connection info from plugin logs
+          # ━━━ Print ALL connection info ━━━
           echo ""
           echo "╔══════════════════════════════════════════════════════════════════╗"
-          echo "║  🎮 MINECRAFT SERVER CONNECTION INFO                            ║"
+          echo "║  🎮 ALL SERVER CONNECTION INFO                                  ║"
           echo "╠══════════════════════════════════════════════════════════════════╣"
 
-          # Check if playit plugin generated a claim link or tunnel address
-          if [ -f "logs/latest.log" ]; then
-            echo "║  📋 Checking playit.gg plugin logs for connection address...    ║"
-            PLAYIT_LINK=$(grep -i "playit" logs/latest.log | grep -oE "https?://[^ ]+" | head -1 || true)
-            PLAYIT_ADDR=$(grep -i "tunnel\|address\|playit" logs/latest.log | tail -5 || true)
+          # SFTP Info
+          if [ -f "/tmp/sftp_info.txt" ]; then
+            source /tmp/sftp_info.txt
+            echo "║                                                                  ║"
+            echo "║  📂 SFTP (FileZilla):                                            ║"
+            echo "║     Host: bore.pub   Port: $BORE_SFTP_PORT"
+            echo "║     User: $BORE_SFTP_USER   Pass: (SFTP_PASSWORD secret)"
+          fi
 
+          # Minecraft Info
+          if [ -f "logs/latest.log" ]; then
+            PLAYIT_LINK=$(grep -i "playit" logs/latest.log | grep -oE "https?://[^ ]+" | head -1 || true)
+            PLAYIT_ADDR=$(grep -i "tunnel\|address\|\.ply\.gg" logs/latest.log | tail -3 || true)
             if [ -n "$PLAYIT_LINK" ]; then
-              echo "║  🔗 Claim Link: $PLAYIT_LINK"
+              echo "║                                                                  ║"
+              echo "║  🎮 Minecraft (playit.gg):                                       ║"
+              echo "║     Claim: $PLAYIT_LINK"
             fi
             if [ -n "$PLAYIT_ADDR" ]; then
-              echo "║  📡 Tunnel Logs:"
               echo "$PLAYIT_ADDR" | while IFS= read -r line; do
                 echo "║     $line"
               done
             fi
-          else
-            echo "║  ⚠️ Server log not found yet. Check GitHub Actions live log.    ║"
           fi
 
           echo "║                                                                  ║"
-          echo "║  📂 File Manager: https://files.vikashbuilds.in                  ║"
-          echo "║     Login: admin / admin123                                       ║"
           echo "╚══════════════════════════════════════════════════════════════════╝"
           echo ""
 
-          # Periodic backup every 30 minutes while server runs
+          # ━━━ Periodic backup loop ━━━
           RUNTIME=19800  # 5 hours 30 minutes
           ELAPSED=0
           BACKUP_INTERVAL=1800  # 30 minutes
@@ -164,15 +257,15 @@ jobs:
             ELAPSED=$((ELAPSED + BACKUP_INTERVAL))
             HOURS=$((ELAPSED / 3600))
             MINS=$(((ELAPSED % 3600) / 60))
-            echo "⏰ Uptime: ${HOURS}h ${MINS}m — Performing 30-minute incremental R2 backup..."
-            bash scripts/backup.sh || echo "⚠️ Background backup warning."
+            echo "⏰ Uptime: ${HOURS}h ${MINS}m — Performing 30-minute backup..."
+            bash scripts/backup.sh || echo "⚠️ Backup warning."
           done
 
-          echo "⚠️ 5 hours 30 minutes reached. Initiating graceful server shutdown..."
+          echo "⚠️ 5h 30m reached. Graceful shutdown..."
           echo "stop" > /tmp/mc_cmd 2>/dev/null || kill -SIGTERM $SERVER_PID 2>/dev/null || true
           sleep 15
 
-          echo "📦 Performing final world upload to Cloudflare R2..."
+          echo "📦 Final backup to Cloudflare R2..."
           bash scripts/backup.sh
 
           echo "✅ Graceful shutdown completed!"
@@ -191,4 +284,4 @@ jobs:
             echo "⚠️ Retry $attempt failed. Retrying in 10 seconds..."
             sleep 10
           done
-          echo "❌ Infinite trigger failed after 3 attempts. Backup cron will restart within 6 hours."
+          echo "❌ Trigger failed after 3 attempts. Backup cron will restart within 6 hours."
