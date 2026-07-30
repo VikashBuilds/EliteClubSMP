@@ -93,17 +93,44 @@ Then go to **GitHub Actions** → **Minecraft Server 24/7 (14GB macOS)** → cli
 
 ## 📁 Managing Server Files Live (2 Ways)
 
-### Method 1: Web File Manager (Browser) 🌐
+### Method 1: Web File Manager (Recommended — No FileZilla Needed) 🌐
 1. Open **`https://files.vikashbuilds.in`** in your browser.
 2. Login credentials:
    - **Username:** `admin`
-   - **Password:** `admin123` (changeable in filebrowser settings)
-3. You can drag-and-drop plugins, edit `server.properties`, upload new worlds, download logs, and edit any file live while the server is running!
+   - **Password:** `admin123`
+3. Drag-and-drop plugins, upload world folders, edit `server.properties`, and edit files live right in your browser!
 
-### Method 2: SFTP / WinSCP / FileZilla 📁
-1. Open **FileZilla** or **WinSCP**.
-2. Host: `mc.vikashbuilds.in` (or your playit SFTP address)
-3. Port: `22` (or your playit SFTP port)
-4. Protocol: **SFTP**
-5. Username: `runner`
-6. Password: `Vikash@0436` (or whatever you set in `SFTP_PASSWORD` secret)
+---
+
+### Method 2: SFTP / FileZilla / WinSCP 📁
+
+> [!WARNING]
+> **Why `mc.vikashbuilds.in:22` timed out:**  
+> `mc.vikashbuilds.in` routes Minecraft traffic (Port 25565). Standard Cloudflare HTTP/TCP proxies do not forward Port 22 on the same subdomain.
+
+To connect FileZilla / WinSCP, use **playit.gg SFTP** or **Cloudflare SSH Hostname**:
+
+#### Option A: via `playit.gg` (Easiest for FileZilla)
+1. Go to your [playit.gg dashboard](https://playit.gg/account/tunnels).
+2. Click **Add Tunnel** → select **Custom TCP Port 22** (SSH/SFTP).
+3. `playit.gg` will give you a host and custom port (e.g., `sftp-app.ply.gg` and port `34891`).
+4. In FileZilla:
+   - **Host:** `sftp-app.ply.gg` (your playit address)
+   - **Port:** `34891` (your playit assigned port)
+   - **Protocol:** `SFTP`
+   - **Username:** `runner`
+   - **Password:** `Vikash@0436` (or your `SFTP_PASSWORD` secret)
+
+#### Option B: via Cloudflare Zero Trust (SSH Hostname)
+1. In Cloudflare Zero Trust → **Public Hostnames**:
+   - Subdomain: `sftp`
+   - Domain: `vikashbuilds.in`
+   - Type: `SSH`
+   - URL: `localhost:22`
+2. Download and install `cloudflared` on your PC.
+3. Edit your local SSH config (`~/.ssh/config`):
+   ```
+   Host sftp.vikashbuilds.in
+     ProxyCommand cloudflared access ssh --hostname %h
+   ```
+4. In FileZilla, connect to Host: `sftp.vikashbuilds.in`, Port: `22`, User: `runner`, Password: `Vikash@0436`.
