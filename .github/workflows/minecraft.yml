@@ -54,18 +54,26 @@ jobs:
 
           # Download playit.gg Minecraft Plugin (Java-based, works on any OS)
           # This replaces the native playit agent that has no macOS ARM64 build
-          echo "📥 Downloading playit.gg Minecraft Plugin..."
-          PLAYIT_PLUGIN_URL="https://hangar.papermc.io/api/v1/projects/playit/playit/versions/0.2.1/PAPER/download"
-          curl -sL -o plugins/playit-plugin.jar "$PLAYIT_PLUGIN_URL" || {
-            echo "⚠️ Hangar download failed. Trying GitHub mirror..."
-            curl -sL -o plugins/playit-plugin.jar "https://github.com/playit-cloud/playit-minecraft-plugin/releases/latest/download/playit-minecraft-plugin.jar" || {
-              echo "❌ Could not download playit plugin. Server will start without tunnel."
-            }
-          }
+          # Using direct GitHub releases URL (Hangar API redirects to this same file)
+          echo "📥 Downloading playit.gg Minecraft Plugin v0.2.0..."
+          PLAYIT_PLUGIN_URL="https://github.com/playit-cloud/playit-minecraft-plugin/releases/download/v0.2.0/playit-minecraft-plugin.jar"
+          curl -sL -o plugins/playit-minecraft-plugin.jar "$PLAYIT_PLUGIN_URL"
 
-          if [ -f "plugins/playit-plugin.jar" ]; then
-            PSIZE=$(du -h plugins/playit-plugin.jar | cut -f1)
-            echo "✅ playit.gg plugin downloaded ($PSIZE)"
+          # Validate the downloaded file is actually a JAR (ZIP format starts with PK magic bytes)
+          if [ -f "plugins/playit-minecraft-plugin.jar" ]; then
+            FILE_HEAD=$(xxd -l 2 -p plugins/playit-minecraft-plugin.jar 2>/dev/null || echo "0000")
+            FILE_SIZE=$(stat -f%z plugins/playit-minecraft-plugin.jar 2>/dev/null || stat -c%s plugins/playit-minecraft-plugin.jar 2>/dev/null || echo "0")
+
+            if [ "$FILE_HEAD" = "504b" ] && [ "$FILE_SIZE" -gt 100000 ]; then
+              echo "✅ playit.gg plugin downloaded and validated ($(du -h plugins/playit-minecraft-plugin.jar | cut -f1))"
+            else
+              echo "❌ Downloaded file is NOT a valid JAR (size: ${FILE_SIZE}, magic: ${FILE_HEAD})"
+              echo "   Removing corrupted file..."
+              rm -f plugins/playit-minecraft-plugin.jar
+              echo "   ⚠️ Server will start without playit tunnel. You can manually upload the plugin via File Manager."
+            fi
+          else
+            echo "❌ Download failed. Server will start without tunnel."
           fi
 
           echo "✅ Server configuration ready!"
