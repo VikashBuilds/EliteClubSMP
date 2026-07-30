@@ -8,17 +8,12 @@ echo "============================================"
 # Accept Minecraft EULA
 echo "eula=true" > eula.txt
 
-# Download latest PaperMC 1.21 JAR if not present
+# Download latest Purpur / Paper 1.21.1 JAR if not present
 if [ ! -f "paper.jar" ]; then
-  echo "📥 Downloading PaperMC 1.21.1..."
-  PAPER_PROJECT="paper"
-  PAPER_VERSION="1.21.1"
-  BUILD_INFO=$(curl -s https://api.papermc.io/v2/projects/${PAPER_PROJECT}/versions/${PAPER_VERSION})
-  LATEST_BUILD=$(echo "$BUILD_INFO" | jq -r '.builds[-1]')
-  DOWNLOAD_URL="https://api.papermc.io/v2/projects/${PAPER_PROJECT}/versions/${PAPER_VERSION}/builds/${LATEST_BUILD}/downloads/${PAPER_PROJECT}-${PAPER_VERSION}-${LATEST_BUILD}.jar"
-  
-  echo "Downloading build #${LATEST_BUILD} from ${DOWNLOAD_URL}..."
-  curl -o paper.jar "$DOWNLOAD_URL"
+  echo "📥 Downloading Paper/Purpur 1.21.1 server JAR..."
+  DOWNLOAD_URL="https://api.purpurmc.org/v2/purpur/1.21.1/latest/download"
+  curl -sL -o paper.jar "$DOWNLOAD_URL"
+  echo "✅ Downloaded paper.jar successfully ($(du -h paper.jar | cut -f1))"
 fi
 
 # High-performance JVM flags optimized for 14GB RAM & Aikar's Flags
