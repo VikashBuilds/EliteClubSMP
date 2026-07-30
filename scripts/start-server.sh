@@ -8,12 +8,12 @@ echo "============================================"
 # Accept Minecraft EULA
 echo "eula=true" > eula.txt
 
-# Download latest Purpur / Paper 1.21.1 JAR if not present
+# Download latest Purpur / Paper 1.21.4 JAR if not present
 if [ ! -f "paper.jar" ]; then
-  echo "📥 Downloading Paper/Purpur 1.21.1 server JAR..."
-  DOWNLOAD_URL="https://api.purpurmc.org/v2/purpur/1.21.1/latest/download"
+  echo "📥 Downloading Paper/Purpur 1.21.4 server JAR..."
+  DOWNLOAD_URL="https://api.purpurmc.org/v2/purpur/1.21.4/latest/download"
   curl -sL -o paper.jar "$DOWNLOAD_URL"
-  echo "✅ Downloaded paper.jar successfully ($(du -h paper.jar | cut -f1))"
+  echo "✅ Downloaded paper.jar (1.21.4) successfully ($(du -h paper.jar | cut -f1))"
 fi
 
 # High-performance JVM flags optimized for 14GB RAM & Aikar's Flags
