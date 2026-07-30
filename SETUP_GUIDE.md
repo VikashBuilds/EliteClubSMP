@@ -1,97 +1,109 @@
-# 🎮 24/7 Minecraft Server Guide (macOS 14GB RAM + Cloudflare R2)
+# 🎮 24/7 Minecraft Server Guide (macOS 14GB RAM + Cloudflare R2 + Web File Manager + SFTP)
 
 > **Server Spec:** macOS (`macos-latest`) — 3 vCPUs, **14 GB RAM** (12 GB dedicated Java Heap)  
 > **World Storage:** Cloudflare R2 (Free S3-compatible bucket)  
-> **Domain Address:** `mc.vikashbuilds.in`
+> **Minecraft Address:** `mc.vikashbuilds.in`  
+> **Web File Manager:** `files.vikashbuilds.in` (Port 8080)  
+> **SFTP / WinSCP:** Port 22 / playit tunnel
 
 ---
 
-## 📌 Step 1: Create Free Cloudflare R2 Storage Bucket
+## 📂 Step 1: Copy Your Existing Server Files (Local Setup)
+
+If you already have existing Minecraft server files (like `world`, `world_nether`, `world_the_end`, `plugins`, `ops.json`, `whitelist.json`, `server.properties`):
+
+1. Open your existing Minecraft server folder on your computer.
+2. Copy all your files and paste them into:
+   ```
+   c:\Users\Vikash Meena\Desktop\Automations\36-MinecraftServer\
+   ```
+3. Your local folder should contain:
+   - `world/`
+   - `world_nether/` (optional)
+   - `world_the_end/` (optional)
+   - `plugins/` (optional)
+   - `server.properties`
+   - `scripts/`
+   - `.github/`
+
+> **Note:** `.gitignore` is already set up to keep heavy binary downloads like `.jar` or logs clean while tracking your custom configs and worlds!
+
+---
+
+## 📌 Step 2: Create Free Cloudflare R2 Storage Bucket
 
 1. Go to **https://dash.cloudflare.com** → click **R2** in left sidebar.
 2. Click **Create bucket**.
-3. Bucket name: **`minecraft-world-backup`** (or your preferred name).
+3. Bucket name: **`minecraft-world-backup`**.
 4. Click **Create Bucket**.
-5. Click **Manage R2 API Tokens** (on the right sidebar under Account details).
-6. Click **Create API Token**:
+5. Click **Manage R2 API Tokens** → **Create API Token**:
    - Token Name: `minecraft-actions`
    - Permissions: **Object Read & Write**
-   - Click **Create API Token**.
-7. Copy and save:
+6. Save:
    - **Access Key ID**
    - **Secret Access Key**
-   - **Account ID** (found on R2 overview page URL: `dash.cloudflare.com/<ACCOUNT_ID>/r2`)
+   - **Account ID**
 
 ---
 
-## 📌 Step 2: Configure Cloudflare Tunnel / playit.gg
+## 🌐 Step 3: Configure Public Hostnames in Cloudflare Zero Trust
 
-You have two options for connecting players to `mc.vikashbuilds.in`:
+In your Cloudflare Zero Trust Dashboard (**https://one.dash.cloudflare.com**) under **Networks → Tunnels → Your Tunnel → Public Hostnames**:
 
-### Option A: `playit.gg` + Cloudflare DNS (Recommended for Minecraft Raw TCP)
-1. Go to **https://playit.gg** → sign up for a free account.
-2. Create an agent token → copy your **Secret Key**.
-3. In `playit.gg` dashboard, add a **Custom Domain / CNAME**:
-   - Point your assigned `playit` domain (e.g. `xyz.ply.gg`) to `mc.vikashbuilds.in`.
-4. In Cloudflare DNS for **`vikashbuilds.in`**:
-   - Add **CNAME** record:
-     - Name: `mc`
-     - Target: `xyz.ply.gg`
-     - Proxy status: **DNS Only (Grey Cloud)** ⚙️
-
-### Option B: Cloudflare Zero Trust Named Tunnel
-1. Go to **https://one.dash.cloudflare.com** (Zero Trust) → **Networks** → **Tunnels**.
-2. Click **Create a tunnel** → select **Cloudflared**.
-3. Tunnel Name: `minecraft-server`.
-4. Copy the **Tunnel Token**.
-5. Add Public Hostname:
-   - Subdomain: `mc`
-   - Domain: `vikashbuilds.in`
-   - Type: `TCP`
-   - URL: `localhost:25565`
+| Subdomain | Domain | Type | URL / Target | Purpose |
+|---|---|---|---|---|
+| `mc` | `vikashbuilds.in` | `TCP` | `localhost:25565` | Minecraft Java Server Address |
+| `files` | `vikashbuilds.in` | `HTTP` | `localhost:8080` | Web File Manager (cPanel style) |
 
 ---
 
-## 📌 Step 3: Add Secrets to GitHub Repository
+## 🔐 Step 4: Add GitHub Secrets
 
-1. Go to your GitHub repository (**`https://github.com/VikashBuilds/minecraft-server`**)
-2. Go to **Settings** → **Secrets and variables** → **Actions**.
-3. Add the following secrets:
+Go to **https://github.com/VikashBuilds/minecraft-server** → **Settings** → **Secrets and variables** → **Actions**:
 
-| Secret Name | Description / Value |
-|---|---|
-| `R2_ACCOUNT_ID` | Your Cloudflare Account ID |
-| `R2_ACCESS_KEY_ID` | Cloudflare R2 API Token Access Key |
-| `R2_SECRET_ACCESS_KEY` | Cloudflare R2 API Token Secret Key |
-| `R2_BUCKET_NAME` | `minecraft-world-backup` |
-| `PLAYIT_SECRET_KEY` | *(Optional if using playit.gg)* Your playit.gg secret key |
-| `CLOUDFLARE_TUNNEL_TOKEN` | *(Optional if using Cloudflare Tunnel)* Your Cloudflare tunnel token |
+| Secret Name | Description | Default / Example |
+|---|---|---|
+| `R2_ACCOUNT_ID` | Cloudflare Account ID | `<YOUR_ACCOUNT_ID>` |
+| `R2_ACCESS_KEY_ID` | Cloudflare R2 Access Key | `<YOUR_ACCESS_KEY_ID>` |
+| `R2_SECRET_ACCESS_KEY` | Cloudflare R2 Secret Key | `<YOUR_SECRET_ACCESS_KEY>` |
+| `R2_BUCKET_NAME` | `minecraft-world-backup` | `minecraft-world-backup` |
+| `CLOUDFLARE_TUNNEL_TOKEN` | Cloudflare Tunnel Token | `<YOUR_TUNNEL_TOKEN>` |
+| `PLAYIT_SECRET_KEY` | *(Optional)* playit.gg secret | `<YOUR_PLAYIT_KEY>` |
+| `SFTP_PASSWORD` | *(Optional)* Password for SFTP | `Vikash@0436` |
 
 ---
 
-## 📌 Step 4: Push Repository & Trigger Server
+## 🚀 Step 5: Push Repository & Start Server
 
-In your terminal:
+Run in your terminal:
 
 ```bash
 cd "c:\Users\Vikash Meena\Desktop\Automations\36-MinecraftServer"
 git init
 git remote add origin https://VikashBuilds@github.com/VikashBuilds/minecraft-server.git
 git add .
-git commit -m "feat: 24/7 minecraft server on macOS 14GB RAM with R2 backup"
+git commit -m "feat: 24/7 minecraft server with Web File Manager & SFTP"
 git branch -M main
 git push -u origin main
 ```
 
-After pushing:
-1. Go to **https://github.com/VikashBuilds/minecraft-server/actions**.
-2. Click **Minecraft Server 24/7 (14GB macOS)** → click **Run workflow**.
+Then go to **GitHub Actions** → **Minecraft Server 24/7 (14GB macOS)** → click **Run workflow**.
 
 ---
 
-## 🎮 Joining Your Server
+## 📁 Managing Server Files Live (2 Ways)
 
-In Minecraft (Java Edition 1.21.x):
-1. Click **Multiplayer** → **Add Server**.
-2. Server Address: **`mc.vikashbuilds.in`**
-3. Click **Done** & Join! 🚀
+### Method 1: Web File Manager (Browser) 🌐
+1. Open **`https://files.vikashbuilds.in`** in your browser.
+2. Login credentials:
+   - **Username:** `admin`
+   - **Password:** `admin123` (changeable in filebrowser settings)
+3. You can drag-and-drop plugins, edit `server.properties`, upload new worlds, download logs, and edit any file live while the server is running!
+
+### Method 2: SFTP / WinSCP / FileZilla 📁
+1. Open **FileZilla** or **WinSCP**.
+2. Host: `mc.vikashbuilds.in` (or your playit SFTP address)
+3. Port: `22` (or your playit SFTP port)
+4. Protocol: **SFTP**
+5. Username: `runner`
+6. Password: `Vikash@0436` (or whatever you set in `SFTP_PASSWORD` secret)

@@ -25,12 +25,12 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Install AWS CLI & jq
+      - name: Install AWS CLI & Utilities
         run: |
-          brew install awscli jq
+          brew install awscli jq filebrowser || true
           chmod +x scripts/*.sh
 
-      - name: Restore World from Cloudflare R2
+      - name: Restore World & Server Files from Cloudflare R2
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -38,6 +38,32 @@ jobs:
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
         run: |
           bash scripts/restore.sh
+
+      - name: Enable SFTP & OpenSSH Server
+        env:
+          SFTP_PASS: ${{ secrets.SFTP_PASSWORD }}
+        run: |
+          echo "🔐 Setting up OpenSSH / SFTP Server..."
+          PASS="${SFTP_PASS:-Vikash@0436}"
+          
+          # Set password for current runner user
+          sudo dscl . -passwd /Users/$USER "$PASS" || true
+          echo "$USER:$PASS" | sudo chpasswd || true
+
+          # Enable SSH service
+          sudo systemsetup -setremotelogin on || true
+          sudo launchctl load -w /System/Library/LaunchDaemons/ssh.plist 2>/dev/null || true
+          echo "✅ SFTP/SSH service enabled for user: $USER"
+
+      - name: Start Web File Manager (Filebrowser on Port 8080)
+        run: |
+          echo "📁 Launching Web File Manager..."
+          curl -fsSL https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash || true
+          filebrowser config init -b / || true
+          filebrowser config set --address 0.0.0.0 --port 8080 --root . || true
+          filebrowser users add admin admin123 --perm.admin || true
+          filebrowser &
+          echo "✅ Web File Manager running on port 8080 (user: admin / pass: admin123)"
 
       - name: Start Cloudflare Tunnel & playit.gg Tunnel
         env:
@@ -53,9 +79,9 @@ jobs:
             cloudflared tunnel run --token "$CLOUDFLARE_TUNNEL_TOKEN" &
           fi
 
-          # 2. playit.gg TCP Tunnel (Direct TCP proxy for Minecraft 25565)
+          # 2. playit.gg TCP Tunnel (Direct TCP proxy for Minecraft 25565 & SFTP 22)
           if [ -n "$PLAYIT_SECRET_KEY" ]; then
-            echo "⚡ Starting playit.gg TCP Tunnel..."
+            echo "⚡ Starting playit.gg TCP & SFTP Tunnel..."
             curl -sL https://playit.gg/downloads/playit-0.15.26-x86_64-apple-darwin.tar.gz -o playit.tar.gz
             tar -xzf playit.tar.gz
             chmod +x playit

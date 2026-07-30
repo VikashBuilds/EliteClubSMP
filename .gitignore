@@ -16,3 +16,4 @@ whitelist.json
 .playit/
 playit
 .env
+minecraft/
