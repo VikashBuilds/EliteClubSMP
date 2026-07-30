@@ -1,0 +1,17 @@
+# Minecraft runtime files
+*.jar
+*.log
+*.gz
+world/
+world_nether/
+world_the_end/
+plugins/
+logs/
+cache/
+usercache.json
+banned-ips.json
+banned-players.json
+ops.json
+whitelist.json
+.playit/
+playit
