@@ -76,10 +76,8 @@ jobs:
           mkdir -p plugins/playit-gg
           if [ -n "$PLAYIT_SECRET" ]; then
             echo "🔑 Writing saved playit.gg secret key to plugin config..."
-            cat > plugins/playit-gg/config.yml <<EOF
-# playit.gg plugin config — auto-generated
-agent-secret: "$PLAYIT_SECRET"
-EOF
+            echo "# playit.gg plugin config — auto-generated" > plugins/playit-gg/config.yml
+            echo "agent-secret: \"$PLAYIT_SECRET\"" >> plugins/playit-gg/config.yml
             echo "✅ playit.gg secret key restored — NO claim needed this run!"
           else
             echo ""
