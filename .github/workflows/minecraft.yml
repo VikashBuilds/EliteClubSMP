@@ -157,51 +157,62 @@ jobs:
         run: |
           echo "--- Starting playit.gg CLI agent for Voice Chat UDP tunnel..."
 
-          # Create playit config directory
-          mkdir -p /tmp/playit-udp
+          # Create required directories for playit daemon
+          RUNNER_UID=$(id -u)
+          sudo mkdir -p /run/user/$RUNNER_UID
+          sudo chown $USER:$USER /run/user/$RUNNER_UID
+          mkdir -p ~/.config/playit_gg
 
           if [ -n "$PLAYIT_UDP_SECRET" ]; then
             # Write the secret key for auto-login
-            echo "$PLAYIT_UDP_SECRET" > /tmp/playit-udp/playit.toml
+            echo "$PLAYIT_UDP_SECRET" > ~/.config/playit_gg/playit.toml
             echo "  Using saved playit UDP secret"
 
             # Start playit agent in background
-            playit --secret_path /tmp/playit-udp/playit.toml > /tmp/playit_udp.log 2>&1 &
+            playit > /tmp/playit_udp.log 2>&1 &
             sleep 10
 
-            echo "  playit UDP agent started (check logs for tunnel address)"
+            echo "  playit UDP agent started"
+            tail -5 /tmp/playit_udp.log || true
             echo ""
-            echo "  The voice chat UDP tunnel should be active."
-            echo "  Players need the Simple Voice Chat mod to use it."
+            echo "  Voice chat UDP tunnel should be active."
+            echo "  Players need the Simple Voice Chat mod."
           else
             echo ""
             echo "========================================================"
-            echo "  VOICE CHAT UDP TUNNEL — FIRST-TIME SETUP REQUIRED"
+            echo "  VOICE CHAT UDP TUNNEL — FIRST-TIME SETUP"
             echo "========================================================"
             echo ""
-            echo "  Starting playit agent for first-time claim..."
-            echo ""
 
-            # Start playit in claim mode — user needs to visit the URL
+            # Start playit — it will generate a claim URL
             playit > /tmp/playit_udp.log 2>&1 &
             PLAYIT_PID=$!
-            sleep 10
 
-            # Extract the claim URL from logs
-            CLAIM_URL=$(grep -oE "https://playit.gg/claim/[a-zA-Z0-9_-]+" /tmp/playit_udp.log | head -1 || true)
+            # Wait longer for claim URL to appear
+            for i in 1 2 3 4 5 6; do
+              sleep 5
+              CLAIM_URL=$(grep -oE "https://playit\.(gg|io)/claim/[a-zA-Z0-9_-]+" /tmp/playit_udp.log | head -1 || true)
+              if [ -n "$CLAIM_URL" ]; then
+                break
+              fi
+              echo "  Waiting for claim URL (attempt $i/6)..."
+            done
+
             if [ -n "$CLAIM_URL" ]; then
+              echo ""
               echo "  1. Visit this URL to claim your UDP agent:"
               echo "     $CLAIM_URL"
               echo ""
-              echo "  2. In playit.gg dashboard, add a UDP tunnel:"
-              echo "     - Protocol: UDP"
+              echo "  2. In playit.gg dashboard, add a tunnel:"
+              echo "     - Type: UDP"
               echo "     - Local port: 24454"
               echo ""
-              echo "  3. After claiming, find the secret in /tmp/playit-udp/"
-              echo "     and save it as GitHub Secret: PLAYIT_UDP_SECRET"
+              echo "  3. Copy the secret from:"
+              echo "     ~/.config/playit_gg/playit.toml"
+              echo "     Save it as GitHub Secret: PLAYIT_UDP_SECRET"
             else
-              echo "  Could not find claim URL. Check /tmp/playit_udp.log"
-              tail -20 /tmp/playit_udp.log || true
+              echo "  Playit agent log:"
+              cat /tmp/playit_udp.log || true
             fi
             echo ""
             echo "========================================================"
