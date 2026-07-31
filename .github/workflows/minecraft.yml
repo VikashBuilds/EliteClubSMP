@@ -244,21 +244,65 @@ jobs:
             echo "The SFTP tunnel will keep retrying in the background."
           fi
 
-      - name: Start Cloudflare Tunnel (HTTP File Manager backup)
+      - name: Start Web Console + File Manager + Cloudflare Tunnel
         env:
           CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
         run: |
-          # Keep filebrowser running as a backup file manager
-          echo "📁 Launching Web File Manager on port 8080..."
+          SERVER_DIR="$(pwd)"
+
+          # ━━━ Start Web File Manager (port 8080) ━━━
+          echo "--- Starting Web File Manager on port 8080..."
           filebrowser -a 0.0.0.0 -p 8080 -r . --username admin --password admin123 &
           sleep 2
 
+          # ━━━ Start Minecraft Web Console (port 8081) ━━━
+          echo "--- Starting Minecraft Web Console on port 8081..."
+          MC_PIPE="/tmp/mc_cmd" MC_LOG="$SERVER_DIR/logs/latest.log" CONSOLE_PASSWORD="admin123" \
+            python3 scripts/web-console.py &
+          sleep 2
+          echo "  Console running: http://localhost:8081 (password: admin123)"
+
+          # ━━━ Start Cloudflare Tunnel ━━━
           if [ -n "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
-            echo "🌐 Starting Cloudflare Tunnel for files.vikashbuilds.in..."
+            echo "--- Starting Cloudflare Tunnel..."
             brew install cloudflared 2>/dev/null || true
             cloudflared tunnel run --token "$CLOUDFLARE_TUNNEL_TOKEN" &
             sleep 5
-            echo "✅ Cloudflare Tunnel started (files.vikashbuilds.in → localhost:8080)"
+            echo "  Cloudflare Tunnel started (files.vikashbuilds.in -> localhost:8080)"
+          fi
+
+          # ━━━ Start bore tunnel for Web Console (port 8081) ━━━
+          echo "--- Starting bore tunnel for Web Console..."
+          bore local 8081 --to bore.pub > /tmp/bore_console.log 2>&1 &
+
+          CONSOLE_PORT=""
+          for attempt in 1 2 3 4 5 6; do
+            sleep 5
+            CONSOLE_PORT=$(grep -oE "bore\.pub:[0-9]+" /tmp/bore_console.log | head -1 | cut -d: -f2 || true)
+            if [ -n "$CONSOLE_PORT" ]; then
+              break
+            fi
+            echo "  Waiting for console tunnel (attempt $attempt/6)..."
+          done
+
+          if [ -n "$CONSOLE_PORT" ]; then
+            echo ""
+            echo "========================================================"
+            echo "  MINECRAFT WEB CONSOLE"
+            echo "========================================================"
+            echo "  URL:      http://bore.pub:$CONSOLE_PORT"
+            echo "  Password: admin123"
+            echo ""
+            echo "  Features:"
+            echo "  - Live server logs"
+            echo "  - Send console commands (say, op, gamemode, etc.)"
+            echo "  - Quick command buttons"
+            echo "========================================================"
+            echo ""
+            echo "CONSOLE_URL=http://bore.pub:$CONSOLE_PORT" > /tmp/console_info.txt
+          else
+            echo "  Console tunnel failed. Log:"
+            cat /tmp/bore_console.log || true
           fi
 
       - name: Launch Minecraft Server & Auto-Backup Loop (5h 30m)
@@ -320,6 +364,20 @@ jobs:
               echo "║  → Then all future runs auto-connect (no claim needed!)          ║"
             fi
           fi
+
+          # Web Console Info
+          if [ -f "/tmp/console_info.txt" ]; then
+            source /tmp/console_info.txt
+            echo "║                                                                  ║"
+            echo "║  🖥️  Web Console (send commands from browser):                    ║"
+            echo "║     URL:      $CONSOLE_URL"
+            echo "║     Password: admin123"
+          fi
+
+          echo "║                                                                  ║"
+          echo "║  📁 Web File Manager:                                             ║"
+          echo "║     URL:      https://files.vikashbuilds.in                       ║"
+          echo "║     Login:    admin / admin123                                    ║"
 
           echo "║                                                                  ║"
           echo "╚══════════════════════════════════════════════════════════════════╝"
