@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-echo "============================================"
-echo "  📦 Backing Up FULL Server to Cloudflare R2"
-echo "============================================"
+echo "=== Backing up server to Cloudflare R2 ==="
 
 # Configure AWS CLI for Cloudflare R2
 export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
@@ -35,25 +33,26 @@ TARGET_FILES=()
 [ -f "usercache.json" ] && TARGET_FILES+=("usercache.json")
 [ -f "permissions.yml" ] && TARGET_FILES+=("permissions.yml")
 
+# Server icon
+[ -f "server-icon.png" ] && TARGET_FILES+=("server-icon.png")
+
 # Plugins (configs, data, JARs)
 [ -d "plugins" ] && TARGET_FILES+=("plugins")
 
 if [ ${#TARGET_FILES[@]} -eq 0 ]; then
-  echo "⚠️ No server files found to backup."
+  echo "WARNING: No server files found to backup."
   exit 0
 fi
 
-echo "🗜️ Archiving ${#TARGET_FILES[@]} items: ${TARGET_FILES[*]}"
+echo "Archiving ${#TARGET_FILES[@]} items..."
 tar -czf minecraft-server-latest.tar.gz "${TARGET_FILES[@]}"
 ARCHIVE_SIZE=$(du -h minecraft-server-latest.tar.gz | cut -f1)
-echo "📦 Archive size: $ARCHIVE_SIZE"
+echo "Archive size: $ARCHIVE_SIZE"
 
-echo "🚀 Uploading to Cloudflare R2 bucket: ${R2_BUCKET_NAME}..."
+# Upload ONLY the latest file (overwrites previous)
+# No timestamped copies — saves R2 storage (free tier = 10 GB)
+echo "Uploading to R2 (overwriting previous backup)..."
 aws s3 cp ./minecraft-server-latest.tar.gz "s3://${R2_BUCKET_NAME}/minecraft-server-latest.tar.gz" --endpoint-url "$R2_ENDPOINT"
 
-# Also save a timestamped backup copy (keep history)
-TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-aws s3 cp ./minecraft-server-latest.tar.gz "s3://${R2_BUCKET_NAME}/backups/server_${TIMESTAMP}.tar.gz" --endpoint-url "$R2_ENDPOINT"
-
 rm -f minecraft-server-latest.tar.gz
-echo "✅ Full server backup to R2 completed! ($ARCHIVE_SIZE)"
+echo "Backup done! ($ARCHIVE_SIZE)"
