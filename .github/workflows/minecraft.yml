@@ -126,12 +126,12 @@ jobs:
           mkdir -p plugins/voicechat
           if [ -f "plugins/voicechat/voicechat-server.properties" ]; then
             # Set voice_host to playit.gg UDP tunnel
-            sed -i 's/^voice_host=.*/voice_host=stank-gigabyte.tun.ply.gg:24028/' plugins/voicechat/voicechat-server.properties
+            sed -i 's/^voice_host=.*/voice_host=stank-aliases.tun.ply.gg:24149/' plugins/voicechat/voicechat-server.properties
             # Ensure bind to all interfaces
             sed -i 's/^bind_address=.*/bind_address=0.0.0.0/' plugins/voicechat/voicechat-server.properties
             # Use port 24454 (default)
             sed -i 's/^port=.*/port=24454/' plugins/voicechat/voicechat-server.properties
-            echo "  Voice chat config updated (host=stank-gigabyte.tun.ply.gg:24028, port 24454 UDP)"
+            echo "  Voice chat config updated (host=stank-aliases.tun.ply.gg:24149, port 24454 UDP)"
           else
             # Create fresh config if not restored from R2
             printf '%s\n' \
@@ -143,7 +143,7 @@ jobs:
               "mtu_size=1275" \
               "keep_alive=1000" \
               "enable_groups=true" \
-              "voice_host=stank-gigabyte.tun.ply.gg:24028" \
+              "voice_host=stank-aliases.tun.ply.gg:24149" \
               "allow_recording=true" \
               "force_voice_chat=false" \
               "allow_pings=true" \
