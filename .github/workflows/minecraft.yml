@@ -125,13 +125,13 @@ jobs:
           echo "--- Configuring Simple Voice Chat UDP..."
           mkdir -p plugins/voicechat
           if [ -f "plugins/voicechat/voicechat-server.properties" ]; then
-            # Set voice_host to empty so it auto-detects from playit.gg
-            sed -i 's/^voice_host=.*/voice_host=/' plugins/voicechat/voicechat-server.properties
+            # Set voice_host to playit.gg UDP tunnel
+            sed -i 's/^voice_host=.*/voice_host=stank-gigabyte.tun.ply.gg:24028/' plugins/voicechat/voicechat-server.properties
             # Ensure bind to all interfaces
             sed -i 's/^bind_address=.*/bind_address=0.0.0.0/' plugins/voicechat/voicechat-server.properties
             # Use port 24454 (default)
             sed -i 's/^port=.*/port=24454/' plugins/voicechat/voicechat-server.properties
-            echo "  Voice chat config updated (port 24454 UDP, auto-detect host)"
+            echo "  Voice chat config updated (host=stank-gigabyte.tun.ply.gg:24028, port 24454 UDP)"
           else
             # Create fresh config if not restored from R2
             printf '%s\n' \
@@ -143,7 +143,7 @@ jobs:
               "mtu_size=1275" \
               "keep_alive=1000" \
               "enable_groups=true" \
-              "voice_host=" \
+              "voice_host=stank-gigabyte.tun.ply.gg:24028" \
               "allow_recording=true" \
               "force_voice_chat=false" \
               "allow_pings=true" \
@@ -271,6 +271,10 @@ jobs:
           SSHD_CONFIG="/etc/ssh/sshd_config"
           sudo cp "$SSHD_CONFIG" "${SSHD_CONFIG}.bak" 2>/dev/null || true
 
+          # Get absolute home path for the runner user
+          RUNNER_HOME=$(eval echo ~$USER)
+          echo "  Runner user: $USER | Home: $RUNNER_HOME"
+
           # Write a clean sshd config that forces key-only auth
           printf '%s\n' \
             "# SSH Server Config — Minecraft SFTP (key-only auth)" \
@@ -278,9 +282,9 @@ jobs:
             "HostKey /etc/ssh/ssh_host_ed25519_key" \
             "HostKey /etc/ssh/ssh_host_rsa_key" \
             "" \
-            "# Force key-based auth ONLY (fixes FileZilla keyboard-interactive error)" \
+            "# Force key-based auth ONLY" \
             "PubkeyAuthentication yes" \
-            "AuthorizedKeysFile .ssh/authorized_keys" \
+            "AuthorizedKeysFile ${RUNNER_HOME}/.ssh/authorized_keys" \
             "PasswordAuthentication no" \
             "ChallengeResponseAuthentication no" \
             "KbdInteractiveAuthentication no" \
@@ -289,11 +293,19 @@ jobs:
             "# Allow SFTP" \
             "Subsystem sftp /usr/lib/openssh/sftp-server" \
             "" \
-            "LogLevel INFO" \
+            "LogLevel DEBUG" \
             | sudo tee "$SSHD_CONFIG" > /dev/null
 
           # Generate host keys if missing
           sudo ssh-keygen -A 2>/dev/null || true
+
+          # Ensure correct ownership and permissions
+          chown -R $USER:$USER ~/.ssh
+          chmod 700 ~/.ssh
+          chmod 600 ~/.ssh/authorized_keys
+          echo "  authorized_keys contents:"
+          head -c 80 ~/.ssh/authorized_keys
+          echo ""
 
           # ━━━ Step 3: Start SSH service (Linux) ━━━
           sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd 2>/dev/null || sudo /usr/sbin/sshd
@@ -304,12 +316,13 @@ jobs:
             echo "  SSH/SFTP server is RUNNING on port 22 (key-only auth)"
           else
             echo "  SSH failed to start, trying manual start..."
-            sudo /usr/sbin/sshd
+            sudo /usr/sbin/sshd -d &
             sleep 2
             if sudo ss -tlnp | grep -q ":22 "; then
               echo "  SSH/SFTP server is RUNNING on port 22"
             else
               echo "  SSH failed to start!"
+              sudo journalctl -u ssh --no-pager -n 20 || true
               exit 1
             fi
           fi
@@ -317,7 +330,7 @@ jobs:
           # ━━━ Step 4: Self-test SSH connection ━━━
           if [ -n "$SSH_PUBLIC_KEY" ]; then
             echo "  Testing SSH connection locally..."
-            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes $USER@localhost echo "SSH_TEST_OK" 2>/dev/null && echo "  SSH self-test PASSED" || echo "  SSH self-test: key auth not verified locally (will work via tunnel)"
+            ssh -vvv -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes $USER@localhost echo "SSH_TEST_OK" 2>&1 | tail -20 || echo "  SSH self-test: check debug output above"
           fi
 
           echo "  SFTP ready! User: $USER | Dir: $SERVER_DIR"
