@@ -115,6 +115,36 @@ jobs:
 
           echo "  Server configuration ready!"
 
+          # ━━━ Configure Simple Voice Chat for tunnel ━━━
+          echo "--- Configuring Simple Voice Chat UDP..."
+          mkdir -p plugins/voicechat
+          if [ -f "plugins/voicechat/voicechat-server.properties" ]; then
+            # Set voice_host to empty so it auto-detects from playit.gg
+            sed -i 's/^voice_host=.*/voice_host=/' plugins/voicechat/voicechat-server.properties
+            # Ensure bind to all interfaces
+            sed -i 's/^bind_address=.*/bind_address=0.0.0.0/' plugins/voicechat/voicechat-server.properties
+            # Use port 24454 (default)
+            sed -i 's/^port=.*/port=24454/' plugins/voicechat/voicechat-server.properties
+            echo "  Voice chat config updated (port 24454 UDP, auto-detect host)"
+          else
+            # Create fresh config if not restored from R2
+            printf '%s\n' \
+              "port=24454" \
+              "bind_address=0.0.0.0" \
+              "max_voice_distance=48.0" \
+              "whisper_distance=24.0" \
+              "codec=VOIP" \
+              "mtu_size=1275" \
+              "keep_alive=1000" \
+              "enable_groups=true" \
+              "voice_host=" \
+              "allow_recording=true" \
+              "force_voice_chat=false" \
+              "allow_pings=true" \
+              > plugins/voicechat/voicechat-server.properties
+            echo "  Fresh voice chat config created (port 24454 UDP)"
+          fi
+
       - name: Setup SFTP / SSH Server (Permanent Key)
         env:
           SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
