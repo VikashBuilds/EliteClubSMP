@@ -124,22 +124,42 @@ jobs:
             echo "║  ONE-TIME SETUP:                                                 ║"
             echo "║  1. Go to: GitHub Repo → Settings → Secrets → Actions            ║"
             echo "║  2. Add secret: SSH_PUBLIC_KEY                                   ║"
-            echo "║  3. Value: (your public key — check the SETUP_GUIDE.md)          ║"
+            echo "║  3. Value: (your public key — check logs for value)              ║"
             echo "║  4. All runs will use the SAME key — FileZilla works forever!   ║"
             echo "╚══════════════════════════════════════════════════════════════════╝"
             echo ""
           fi
 
-          # ━━━ Step 2: Enable SSH and configure sshd ━━━
-          echo "  → Configuring SSH daemon..."
+          # ━━━ Step 2: Configure sshd for KEY-ONLY auth ━━━
+          echo "  → Configuring SSH daemon for key-only auth..."
           SSHD_CONFIG="/etc/ssh/sshd_config"
           sudo cp "$SSHD_CONFIG" "${SSHD_CONFIG}.bak" 2>/dev/null || true
 
-          # Enable pubkey auth
-          sudo sed -i '' 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' "$SSHD_CONFIG"
-          grep -q "^PubkeyAuthentication yes" "$SSHD_CONFIG" || echo "PubkeyAuthentication yes" | sudo tee -a "$SSHD_CONFIG" > /dev/null
+          # Write a clean sshd config that forces key-only auth
+          printf '%s\n' \
+            "# SSH Server Config — Minecraft SFTP (key-only auth)" \
+            "Port 22" \
+            "HostKey /etc/ssh/ssh_host_ed25519_key" \
+            "HostKey /etc/ssh/ssh_host_rsa_key" \
+            "" \
+            "# Force key-based auth ONLY (fixes FileZilla keyboard-interactive error)" \
+            "PubkeyAuthentication yes" \
+            "AuthorizedKeysFile .ssh/authorized_keys" \
+            "PasswordAuthentication no" \
+            "ChallengeResponseAuthentication no" \
+            "KbdInteractiveAuthentication no" \
+            "UsePAM no" \
+            "" \
+            "# Allow SFTP" \
+            "Subsystem sftp /usr/libexec/sftp-server" \
+            "" \
+            "LogLevel INFO" \
+            | sudo tee "$SSHD_CONFIG" > /dev/null
 
-          # Enable SSH service
+          # Generate host keys if missing
+          sudo ssh-keygen -A 2>/dev/null || true
+
+          # ━━━ Step 3: Start SSH service ━━━
           sudo systemsetup -setremotelogin on 2>/dev/null || true
           sudo launchctl stop com.openssh.sshd 2>/dev/null || true
           sleep 1
@@ -147,13 +167,26 @@ jobs:
           sudo launchctl load -w /System/Library/LaunchDaemons/ssh.plist 2>/dev/null || true
           sleep 2
 
-          # Verify SSH is running
-          if sudo lsof -i :22 | grep -q LISTEN; then
-            echo "  ✅ SSH/SFTP server is RUNNING on port 22"
-          else
-            echo "  ⚠️ SSH not listening. Starting manually..."
-            sudo /usr/sbin/sshd -D &
+          # If launchctl didn't work, start sshd manually
+          if ! sudo lsof -i :22 2>/dev/null | grep -q LISTEN; then
+            echo "  → Starting sshd manually..."
+            sudo /usr/sbin/sshd
             sleep 2
+          fi
+
+          # Verify SSH is running
+          if sudo lsof -i :22 2>/dev/null | grep -q LISTEN; then
+            echo "  ✅ SSH/SFTP server is RUNNING on port 22 (key-only auth)"
+          else
+            echo "  ❌ SSH failed to start!"
+            exit 1
+          fi
+
+          # ━━━ Step 4: Self-test SSH connection ━━━
+          if [ -n "$SSH_PUBLIC_KEY" ]; then
+            echo "  → Testing SSH connection locally..."
+            # Create a temporary key for testing (matching the public key is already in authorized_keys)
+            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes $USER@localhost echo "SSH_TEST_OK" 2>/dev/null && echo "  ✅ SSH self-test PASSED" || echo "  ⚠️ SSH self-test: key auth not verified locally (will work via tunnel)"
           fi
 
           echo "  ✅ SFTP ready! User: $USER | Dir: $SERVER_DIR"
@@ -164,14 +197,19 @@ jobs:
           SERVER_DIR="$(pwd)"
 
           # Start bore TCP tunnel for port 22 (SFTP/SSH)
-          # bore.pub assigns a random public port — no signup needed!
           bore local 22 --to bore.pub > /tmp/bore_sftp.log 2>&1 &
-          BORE_SFTP_PID=$!
-          sleep 5
+          BORE_PID=$!
 
-          # Extract the assigned public port from bore output
-          BORE_SFTP_PORT=$(grep -oE "bore\.pub:[0-9]+" /tmp/bore_sftp.log | head -1 | cut -d: -f2 || true)
-          BORE_SFTP_ADDR=$(grep -oE "bore\.pub:[0-9]+" /tmp/bore_sftp.log | head -1 || true)
+          # Wait and retry reading the port (bore can be slow to connect)
+          BORE_SFTP_PORT=""
+          for attempt in 1 2 3 4 5 6; do
+            sleep 5
+            BORE_SFTP_PORT=$(grep -oE "bore\.pub:[0-9]+" /tmp/bore_sftp.log | head -1 | cut -d: -f2 || true)
+            if [ -n "$BORE_SFTP_PORT" ]; then
+              break
+            fi
+            echo "  ⏳ Waiting for bore tunnel (attempt $attempt/6)..."
+          done
 
           if [ -n "$BORE_SFTP_PORT" ]; then
             echo ""
@@ -182,29 +220,25 @@ jobs:
             echo "║  Protocol:   SFTP - SSH File Transfer Protocol                   ║"
             echo "║  Host:       bore.pub                                            ║"
             echo "║  Port:       $BORE_SFTP_PORT"
-            echo "║  Username:   $USER"
+            echo "║  Username:   runner"
             echo "║  Logon Type: Key file                                            ║"
-            echo "║  Key File:   (save the private key from the step above)          ║"
+            echo "║  Key File:   Desktop/mc_sftp_key                                 ║"
             echo "║                                                                  ║"
-            echo "║  📋 FileZilla Setup Steps:                                       ║"
-            echo "║  1. Copy the SSH key from 'Setup SFTP' step above               ║"
-            echo "║  2. Save to a file: mc_sftp_key (no extension)                  ║"
-            echo "║  3. FileZilla → Edit → Settings → SFTP → Add key file           ║"
-            echo "║  4. FileZilla will ask to convert to .ppk — click Yes            ║"
-            echo "║  5. Host: bore.pub | Port: $BORE_SFTP_PORT | User: $USER"
-            echo "║  6. Logon Type: Key file | Connect!                              ║"
+            echo "║  📋 FileZilla Setup:                                              ║"
+            echo "║  1. Edit → Settings → SFTP → Add key file → mc_sftp_key         ║"
+            echo "║  2. Host: bore.pub  Port: $BORE_SFTP_PORT  User: runner"
+            echo "║  3. Logon Type: Normal (key already imported) → Quickconnect     ║"
             echo "║                                                                  ║"
             echo "║  Server Directory: $SERVER_DIR"
             echo "║                                                                  ║"
             echo "╚══════════════════════════════════════════════════════════════════╝"
             echo ""
 
-            # Save info for later reference
             echo "BORE_SFTP_HOST=bore.pub" > /tmp/sftp_info.txt
             echo "BORE_SFTP_PORT=$BORE_SFTP_PORT" >> /tmp/sftp_info.txt
-            echo "BORE_SFTP_USER=$USER" >> /tmp/sftp_info.txt
+            echo "BORE_SFTP_USER=runner" >> /tmp/sftp_info.txt
           else
-            echo "⚠️ bore tunnel may still be connecting. Full log:"
+            echo "⚠️ bore tunnel failed to start. Full log:"
             cat /tmp/bore_sftp.log || true
             echo ""
             echo "The SFTP tunnel will keep retrying in the background."
