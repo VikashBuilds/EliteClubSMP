@@ -1,4 +1,4 @@
-name: Minecraft Server 24/7 (14GB macOS)
+name: Minecraft Server 24/7 (16GB Ubuntu)
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   run-minecraft:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 360  # 6 hours max
 
     steps:
@@ -25,9 +25,33 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Install Tools (AWS CLI, bore, filebrowser)
+      - name: Install Tools (AWS CLI, bore, filebrowser, cloudflared)
         run: |
-          brew install awscli jq bore-cli filebrowser || true
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq openssh-server > /dev/null 2>&1
+
+          # Install AWS CLI (pre-installed on ubuntu-latest, but ensure it's there)
+          which aws || sudo apt-get install -y -qq awscli > /dev/null 2>&1
+
+          # Install bore (TCP tunnel)
+          echo "--- Installing bore..."
+          BORE_URL="https://github.com/ekzhang/bore/releases/latest/download/bore-v0.5.2-x86_64-unknown-linux-musl.tar.gz"
+          curl -sL "$BORE_URL" | tar xz -C /usr/local/bin/ 2>/dev/null || {
+            # Fallback: try cargo install
+            curl -sL https://github.com/ekzhang/bore/releases/download/v0.5.2/bore-v0.5.2-x86_64-unknown-linux-musl.tar.gz -o /tmp/bore.tar.gz
+            tar xzf /tmp/bore.tar.gz -C /usr/local/bin/
+          }
+          bore --version || echo "bore install failed, will retry later"
+
+          # Install filebrowser
+          echo "--- Installing filebrowser..."
+          curl -fsSL https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash
+
+          # Install cloudflared
+          echo "--- Installing cloudflared..."
+          curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
+          chmod +x /usr/local/bin/cloudflared
+
           chmod +x scripts/*.sh
 
       - name: Restore World & Server Files from Cloudflare R2
@@ -43,7 +67,7 @@ jobs:
         env:
           PLAYIT_SECRET: ${{ secrets.PLAYIT_SECRET }}
         run: |
-          echo "📦 Preparing server configuration..."
+          echo "--- Preparing server configuration..."
 
           # Accept EULA
           echo "eula=true" > eula.txt
@@ -52,60 +76,50 @@ jobs:
           mkdir -p plugins
 
           # Download playit.gg Minecraft Plugin (Java-based, works on any OS)
-          echo "📥 Downloading playit.gg Minecraft Plugin v0.2.0..."
+          echo "--- Downloading playit.gg Minecraft Plugin v0.2.0..."
           PLAYIT_PLUGIN_URL="https://github.com/playit-cloud/playit-minecraft-plugin/releases/download/v0.2.0/playit-minecraft-plugin.jar"
           curl -sL -o plugins/playit-minecraft-plugin.jar "$PLAYIT_PLUGIN_URL"
 
           # Validate the downloaded file is actually a JAR (ZIP format starts with PK magic bytes)
           if [ -f "plugins/playit-minecraft-plugin.jar" ]; then
             FILE_HEAD=$(xxd -l 2 -p plugins/playit-minecraft-plugin.jar 2>/dev/null || echo "0000")
-            FILE_SIZE=$(stat -f%z plugins/playit-minecraft-plugin.jar 2>/dev/null || stat -c%s plugins/playit-minecraft-plugin.jar 2>/dev/null || echo "0")
+            FILE_SIZE=$(stat -c%s plugins/playit-minecraft-plugin.jar 2>/dev/null || echo "0")
 
             if [ "$FILE_HEAD" = "504b" ] && [ "$FILE_SIZE" -gt 100000 ]; then
-              echo "✅ playit.gg plugin downloaded and validated ($(du -h plugins/playit-minecraft-plugin.jar | cut -f1))"
+              echo "  playit.gg plugin downloaded and validated ($(du -h plugins/playit-minecraft-plugin.jar | cut -f1))"
             else
-              echo "❌ Downloaded file is NOT a valid JAR (size: ${FILE_SIZE}, magic: ${FILE_HEAD})"
+              echo "  Downloaded file is NOT a valid JAR (size: ${FILE_SIZE}, magic: ${FILE_HEAD})"
               rm -f plugins/playit-minecraft-plugin.jar
-              echo "   ⚠️ Server will start without playit tunnel."
+              echo "  Server will start without playit tunnel."
             fi
           else
-            echo "❌ Download failed. Server will start without tunnel."
+            echo "  Download failed. Server will start without tunnel."
           fi
 
           # ━━━ Pre-write playit.gg secret key so you don't have to claim every run ━━━
           mkdir -p plugins/playit-gg
           if [ -n "$PLAYIT_SECRET" ]; then
-            echo "🔑 Writing saved playit.gg secret key to plugin config..."
+            echo "  Writing saved playit.gg secret key to plugin config..."
             echo "# playit.gg plugin config — auto-generated" > plugins/playit-gg/config.yml
             echo "agent-secret: \"$PLAYIT_SECRET\"" >> plugins/playit-gg/config.yml
-            echo "✅ playit.gg secret key restored — NO claim needed this run!"
+            echo "  playit.gg will auto-connect using saved secret (no claim needed!)"
           else
             echo ""
-            echo "╔══════════════════════════════════════════════════════════════════╗"
-            echo "║  ⚠️  PLAYIT_SECRET not set — you will need to claim this run!  ║"
-            echo "║                                                                  ║"
-            echo "║  FIRST TIME SETUP:                                               ║"
-            echo "║  1. Let the server start and look for the claim link in logs     ║"
-            echo "║  2. Visit the https://playit.gg/claim/XXXXX link                 ║"
-            echo "║  3. After claiming, find the secret key in server logs:           ║"
-            echo "║     Look for: 'secret key set to: XXXXXXXX'                      ║"
-            echo "║     OR check: plugins/playit-gg/config.yml on the server         ║"
-            echo "║  4. Copy the agent-secret value                                  ║"
-            echo "║  5. Go to GitHub repo → Settings → Secrets → Actions             ║"
-            echo "║  6. Add secret: PLAYIT_SECRET = (the value you copied)           ║"
-            echo "║  7. All future runs will auto-connect — no more claiming!        ║"
-            echo "║                                                                  ║"
-            echo "╚══════════════════════════════════════════════════════════════════╝"
+            echo "========================================================"
+            echo "  PLAYIT SECRET NOT SET!"
+            echo "  First run: Watch logs for your playit.gg claim URL"
+            echo "  Then save the secret to GitHub Secrets as PLAYIT_SECRET"
+            echo "========================================================"
             echo ""
           fi
 
-          echo "✅ Server configuration ready!"
+          echo "  Server configuration ready!"
 
       - name: Setup SFTP / SSH Server (Permanent Key)
         env:
           SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
         run: |
-          echo "🔐 Setting up SSH/SFTP Server..."
+          echo "--- Setting up SSH/SFTP Server..."
           SERVER_DIR="$(pwd)"
 
           # ━━━ Step 1: Add your permanent public key to authorized_keys ━━━
@@ -115,23 +129,23 @@ jobs:
           if [ -n "$SSH_PUBLIC_KEY" ]; then
             echo "$SSH_PUBLIC_KEY" > ~/.ssh/authorized_keys
             chmod 600 ~/.ssh/authorized_keys
-            echo "  ✅ Your permanent SSH public key loaded from GitHub Secrets"
+            echo "  Your permanent SSH public key loaded from GitHub Secrets"
           else
             echo ""
-            echo "╔══════════════════════════════════════════════════════════════════╗"
-            echo "║  ❌ SSH_PUBLIC_KEY secret not set — SFTP will NOT work!         ║"
-            echo "║                                                                  ║"
-            echo "║  ONE-TIME SETUP:                                                 ║"
-            echo "║  1. Go to: GitHub Repo → Settings → Secrets → Actions            ║"
-            echo "║  2. Add secret: SSH_PUBLIC_KEY                                   ║"
-            echo "║  3. Value: (your public key — check logs for value)              ║"
-            echo "║  4. All runs will use the SAME key — FileZilla works forever!   ║"
-            echo "╚══════════════════════════════════════════════════════════════════╝"
+            echo "========================================================"
+            echo "  SSH_PUBLIC_KEY secret not set — SFTP will NOT work!"
+            echo ""
+            echo "  ONE-TIME SETUP:"
+            echo "  1. Go to: GitHub Repo -> Settings -> Secrets -> Actions"
+            echo "  2. Add secret: SSH_PUBLIC_KEY"
+            echo "  3. Value: (your public key)"
+            echo "  4. All runs will use the SAME key forever!"
+            echo "========================================================"
             echo ""
           fi
 
           # ━━━ Step 2: Configure sshd for KEY-ONLY auth ━━━
-          echo "  → Configuring SSH daemon for key-only auth..."
+          echo "  Configuring SSH daemon for key-only auth..."
           SSHD_CONFIG="/etc/ssh/sshd_config"
           sudo cp "$SSHD_CONFIG" "${SSHD_CONFIG}.bak" 2>/dev/null || true
 
@@ -151,7 +165,7 @@ jobs:
             "UsePAM no" \
             "" \
             "# Allow SFTP" \
-            "Subsystem sftp /usr/libexec/sftp-server" \
+            "Subsystem sftp /usr/lib/openssh/sftp-server" \
             "" \
             "LogLevel INFO" \
             | sudo tee "$SSHD_CONFIG" > /dev/null
@@ -159,48 +173,42 @@ jobs:
           # Generate host keys if missing
           sudo ssh-keygen -A 2>/dev/null || true
 
-          # ━━━ Step 3: Start SSH service ━━━
-          sudo systemsetup -setremotelogin on 2>/dev/null || true
-          sudo launchctl stop com.openssh.sshd 2>/dev/null || true
-          sleep 1
-          sudo launchctl start com.openssh.sshd 2>/dev/null || true
-          sudo launchctl load -w /System/Library/LaunchDaemons/ssh.plist 2>/dev/null || true
+          # ━━━ Step 3: Start SSH service (Linux) ━━━
+          sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd 2>/dev/null || sudo /usr/sbin/sshd
           sleep 2
 
-          # If launchctl didn't work, start sshd manually
-          if ! sudo lsof -i :22 2>/dev/null | grep -q LISTEN; then
-            echo "  → Starting sshd manually..."
+          # Verify SSH is running
+          if sudo ss -tlnp | grep -q ":22 "; then
+            echo "  SSH/SFTP server is RUNNING on port 22 (key-only auth)"
+          else
+            echo "  SSH failed to start, trying manual start..."
             sudo /usr/sbin/sshd
             sleep 2
-          fi
-
-          # Verify SSH is running
-          if sudo lsof -i :22 2>/dev/null | grep -q LISTEN; then
-            echo "  ✅ SSH/SFTP server is RUNNING on port 22 (key-only auth)"
-          else
-            echo "  ❌ SSH failed to start!"
-            exit 1
+            if sudo ss -tlnp | grep -q ":22 "; then
+              echo "  SSH/SFTP server is RUNNING on port 22"
+            else
+              echo "  SSH failed to start!"
+              exit 1
+            fi
           fi
 
           # ━━━ Step 4: Self-test SSH connection ━━━
           if [ -n "$SSH_PUBLIC_KEY" ]; then
-            echo "  → Testing SSH connection locally..."
-            # Create a temporary key for testing (matching the public key is already in authorized_keys)
-            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes $USER@localhost echo "SSH_TEST_OK" 2>/dev/null && echo "  ✅ SSH self-test PASSED" || echo "  ⚠️ SSH self-test: key auth not verified locally (will work via tunnel)"
+            echo "  Testing SSH connection locally..."
+            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes $USER@localhost echo "SSH_TEST_OK" 2>/dev/null && echo "  SSH self-test PASSED" || echo "  SSH self-test: key auth not verified locally (will work via tunnel)"
           fi
 
-          echo "  ✅ SFTP ready! User: $USER | Dir: $SERVER_DIR"
+          echo "  SFTP ready! User: $USER | Dir: $SERVER_DIR"
 
-      - name: Start SFTP Tunnel (bore → FileZilla)
+      - name: Start SFTP Tunnel (bore -> FileZilla)
         run: |
-          echo "🌐 Starting TCP tunnel for SFTP (port 22)..."
+          echo "--- Starting TCP tunnel for SFTP (port 22)..."
           SERVER_DIR="$(pwd)"
 
           # Start bore TCP tunnel for port 22 (SFTP/SSH)
           bore local 22 --to bore.pub > /tmp/bore_sftp.log 2>&1 &
-          BORE_PID=$!
 
-          # Wait and retry reading the port (bore can be slow to connect)
+          # Wait for bore to establish and extract the assigned port
           BORE_SFTP_PORT=""
           for attempt in 1 2 3 4 5 6; do
             sleep 5
@@ -208,37 +216,37 @@ jobs:
             if [ -n "$BORE_SFTP_PORT" ]; then
               break
             fi
-            echo "  ⏳ Waiting for bore tunnel (attempt $attempt/6)..."
+            echo "  Waiting for bore tunnel (attempt $attempt/6)..."
           done
 
           if [ -n "$BORE_SFTP_PORT" ]; then
             echo ""
-            echo "╔══════════════════════════════════════════════════════════════════╗"
-            echo "║  📂 SFTP / FileZilla Connection Details                         ║"
-            echo "╠══════════════════════════════════════════════════════════════════╣"
-            echo "║                                                                  ║"
-            echo "║  Protocol:   SFTP - SSH File Transfer Protocol                   ║"
-            echo "║  Host:       bore.pub                                            ║"
-            echo "║  Port:       $BORE_SFTP_PORT"
-            echo "║  Username:   runner"
-            echo "║  Logon Type: Key file                                            ║"
-            echo "║  Key File:   Desktop/mc_sftp_key                                 ║"
-            echo "║                                                                  ║"
-            echo "║  📋 FileZilla Setup:                                              ║"
-            echo "║  1. Edit → Settings → SFTP → Add key file → mc_sftp_key         ║"
-            echo "║  2. Host: bore.pub  Port: $BORE_SFTP_PORT  User: runner"
-            echo "║  3. Logon Type: Normal (key already imported) → Quickconnect     ║"
-            echo "║                                                                  ║"
-            echo "║  Server Directory: $SERVER_DIR"
-            echo "║                                                                  ║"
-            echo "╚══════════════════════════════════════════════════════════════════╝"
+            echo "========================================================"
+            echo "  SFTP / FileZilla Connection Details"
+            echo "========================================================"
+            echo ""
+            echo "  Protocol:   SFTP - SSH File Transfer Protocol"
+            echo "  Host:       bore.pub"
+            echo "  Port:       $BORE_SFTP_PORT"
+            echo "  Username:   runner"
+            echo "  Logon Type: Key file"
+            echo "  Key File:   Desktop/mc_sftp_key"
+            echo ""
+            echo "  FileZilla Setup:"
+            echo "  1. Edit -> Settings -> SFTP -> Add key file -> mc_sftp_key"
+            echo "  2. Host: bore.pub  Port: $BORE_SFTP_PORT  User: runner"
+            echo "  3. Logon Type: Normal (key already imported) -> Quickconnect"
+            echo ""
+            echo "  Server Directory: $SERVER_DIR"
+            echo ""
+            echo "========================================================"
             echo ""
 
             echo "BORE_SFTP_HOST=bore.pub" > /tmp/sftp_info.txt
             echo "BORE_SFTP_PORT=$BORE_SFTP_PORT" >> /tmp/sftp_info.txt
             echo "BORE_SFTP_USER=runner" >> /tmp/sftp_info.txt
           else
-            echo "⚠️ bore tunnel failed to start. Full log:"
+            echo "  bore tunnel failed to start. Full log:"
             cat /tmp/bore_sftp.log || true
             echo ""
             echo "The SFTP tunnel will keep retrying in the background."
@@ -265,7 +273,6 @@ jobs:
           # ━━━ Start Cloudflare Tunnel ━━━
           if [ -n "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
             echo "--- Starting Cloudflare Tunnel..."
-            brew install cloudflared 2>/dev/null || true
             cloudflared tunnel run --token "$CLOUDFLARE_TUNNEL_TOKEN" &
             sleep 5
             echo "  Cloudflare Tunnel started (files.vikashbuilds.in -> localhost:8080)"
@@ -312,27 +319,27 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
         run: |
-          echo "🚀 Starting Minecraft Server with 12GB Heap..."
+          echo "--- Starting Minecraft Server with 12GB Heap..."
           bash scripts/start-server.sh &
           SERVER_PID=$!
 
           # Wait for server + plugins to load
-          echo "⏳ Waiting 60 seconds for server to initialize..."
+          echo "--- Waiting 60 seconds for server to initialize..."
           sleep 60
 
           # ━━━ Print ALL connection info ━━━
           echo ""
-          echo "╔══════════════════════════════════════════════════════════════════╗"
-          echo "║  🎮 ALL SERVER CONNECTION INFO                                  ║"
-          echo "╠══════════════════════════════════════════════════════════════════╣"
+          echo "========================================================"
+          echo "  ALL SERVER CONNECTION INFO"
+          echo "========================================================"
 
           # SFTP Info
           if [ -f "/tmp/sftp_info.txt" ]; then
             source /tmp/sftp_info.txt
-            echo "║                                                                  ║"
-            echo "║  📂 SFTP (FileZilla — Key-Based Auth):                           ║"
-            echo "║     Host: bore.pub   Port: $BORE_SFTP_PORT"
-            echo "║     User: $BORE_SFTP_USER   Auth: SSH Key (from Setup step)"
+            echo ""
+            echo "  SFTP (FileZilla — Key-Based Auth):"
+            echo "     Host: bore.pub   Port: $BORE_SFTP_PORT"
+            echo "     User: $BORE_SFTP_USER   Auth: SSH Key (from Setup step)"
           fi
 
           # Minecraft / playit.gg Info
@@ -340,13 +347,13 @@ jobs:
             PLAYIT_LINK=$(grep -i "playit" logs/latest.log | grep -oE "https?://[^ ]+" | head -1 || true)
             PLAYIT_ADDR=$(grep -i "tunnel\|address\|\.ply\.gg" logs/latest.log | tail -3 || true)
             if [ -n "$PLAYIT_LINK" ]; then
-              echo "║                                                                  ║"
-              echo "║  🎮 Minecraft (playit.gg):                                       ║"
-              echo "║     Claim: $PLAYIT_LINK"
+              echo ""
+              echo "  Minecraft (playit.gg):"
+              echo "     Claim: $PLAYIT_LINK"
             fi
             if [ -n "$PLAYIT_ADDR" ]; then
               echo "$PLAYIT_ADDR" | while IFS= read -r line; do
-                echo "║     $line"
+                echo "     $line"
               done
             fi
           fi
@@ -355,32 +362,32 @@ jobs:
           if [ -f "plugins/playit-gg/config.yml" ]; then
             AGENT_SECRET=$(grep "agent-secret" plugins/playit-gg/config.yml | sed 's/.*: *"\?\([^"]*\)"\?/\1/' || true)
             if [ -n "$AGENT_SECRET" ]; then
-              echo "║                                                                  ║"
-              echo "║  🔑 PLAYIT SECRET KEY (save this as GitHub Secret!):             ║"
-              echo "║     $AGENT_SECRET"
-              echo "║                                                                  ║"
-              echo "║  → Go to: GitHub Repo → Settings → Secrets → Actions             ║"
-              echo "║  → Add:   PLAYIT_SECRET = $AGENT_SECRET"
-              echo "║  → Then all future runs auto-connect (no claim needed!)          ║"
+              echo ""
+              echo "  PLAYIT SECRET KEY (save this as GitHub Secret!):"
+              echo "     $AGENT_SECRET"
+              echo ""
+              echo "  -> Go to: GitHub Repo -> Settings -> Secrets -> Actions"
+              echo "  -> Add:   PLAYIT_SECRET = $AGENT_SECRET"
+              echo "  -> Then all future runs auto-connect (no claim needed!)"
             fi
           fi
 
           # Web Console Info
           if [ -f "/tmp/console_info.txt" ]; then
             source /tmp/console_info.txt
-            echo "║                                                                  ║"
-            echo "║  🖥️  Web Console (send commands from browser):                    ║"
-            echo "║     URL:      $CONSOLE_URL"
-            echo "║     Password: admin123"
+            echo ""
+            echo "  Web Console (send commands from browser):"
+            echo "     URL:      $CONSOLE_URL"
+            echo "     Password: admin123"
           fi
 
-          echo "║                                                                  ║"
-          echo "║  📁 Web File Manager:                                             ║"
-          echo "║     URL:      https://files.vikashbuilds.in                       ║"
-          echo "║     Login:    admin / admin123                                    ║"
+          echo ""
+          echo "  Web File Manager:"
+          echo "     URL:      https://files.vikashbuilds.in"
+          echo "     Login:    admin / admin123"
 
-          echo "║                                                                  ║"
-          echo "╚══════════════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "========================================================"
           echo ""
 
           # ━━━ Periodic backup loop (every 15 min) ━━━
@@ -418,13 +425,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo "🔄 Triggering next workflow run..."
+          echo "--- Triggering next workflow run..."
           for attempt in 1 2 3; do
             if gh workflow run minecraft.yml --repo ${{ github.repository }}; then
-              echo "✅ Next Minecraft run triggered successfully!"
+              echo "  Next Minecraft run triggered successfully!"
               exit 0
             fi
-            echo "⚠️ Retry $attempt failed. Retrying in 10 seconds..."
+            echo "  Retry $attempt failed. Retrying in 10 seconds..."
             sleep 10
           done
-          echo "❌ Trigger failed after 3 attempts. Backup cron will restart within 6 hours."
+          echo "  Trigger failed after 3 attempts. Backup cron will restart within 6 hours."
