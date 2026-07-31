@@ -40,6 +40,8 @@ jobs:
           bash scripts/restore.sh
 
       - name: Prepare Server Config & Plugins
+        env:
+          PLAYIT_SECRET: ${{ secrets.PLAYIT_SECRET }}
         run: |
           echo "📦 Preparing server configuration..."
 
@@ -68,6 +70,35 @@ jobs:
             fi
           else
             echo "❌ Download failed. Server will start without tunnel."
+          fi
+
+          # ━━━ Pre-write playit.gg secret key so you don't have to claim every run ━━━
+          mkdir -p plugins/playit-gg
+          if [ -n "$PLAYIT_SECRET" ]; then
+            echo "🔑 Writing saved playit.gg secret key to plugin config..."
+            cat > plugins/playit-gg/config.yml <<EOF
+# playit.gg plugin config — auto-generated
+agent-secret: "$PLAYIT_SECRET"
+EOF
+            echo "✅ playit.gg secret key restored — NO claim needed this run!"
+          else
+            echo ""
+            echo "╔══════════════════════════════════════════════════════════════════╗"
+            echo "║  ⚠️  PLAYIT_SECRET not set — you will need to claim this run!  ║"
+            echo "║                                                                  ║"
+            echo "║  FIRST TIME SETUP:                                               ║"
+            echo "║  1. Let the server start and look for the claim link in logs     ║"
+            echo "║  2. Visit the https://playit.gg/claim/XXXXX link                 ║"
+            echo "║  3. After claiming, find the secret key in server logs:           ║"
+            echo "║     Look for: 'secret key set to: XXXXXXXX'                      ║"
+            echo "║     OR check: plugins/playit-gg/config.yml on the server         ║"
+            echo "║  4. Copy the agent-secret value                                  ║"
+            echo "║  5. Go to GitHub repo → Settings → Secrets → Actions             ║"
+            echo "║  6. Add secret: PLAYIT_SECRET = (the value you copied)           ║"
+            echo "║  7. All future runs will auto-connect — no more claiming!        ║"
+            echo "║                                                                  ║"
+            echo "╚══════════════════════════════════════════════════════════════════╝"
+            echo ""
           fi
 
           echo "✅ Server configuration ready!"
@@ -229,12 +260,12 @@ jobs:
           if [ -f "/tmp/sftp_info.txt" ]; then
             source /tmp/sftp_info.txt
             echo "║                                                                  ║"
-            echo "║  📂 SFTP (FileZilla):                                            ║"
+            echo "║  📂 SFTP (FileZilla — Key-Based Auth):                           ║"
             echo "║     Host: bore.pub   Port: $BORE_SFTP_PORT"
-            echo "║     User: $BORE_SFTP_USER   Pass: (SFTP_PASSWORD secret)"
+            echo "║     User: $BORE_SFTP_USER   Auth: SSH Key (from Setup step)"
           fi
 
-          # Minecraft Info
+          # Minecraft / playit.gg Info
           if [ -f "logs/latest.log" ]; then
             PLAYIT_LINK=$(grep -i "playit" logs/latest.log | grep -oE "https?://[^ ]+" | head -1 || true)
             PLAYIT_ADDR=$(grep -i "tunnel\|address\|\.ply\.gg" logs/latest.log | tail -3 || true)
@@ -247,6 +278,20 @@ jobs:
               echo "$PLAYIT_ADDR" | while IFS= read -r line; do
                 echo "║     $line"
               done
+            fi
+          fi
+
+          # ━━━ Print playit secret key for first-time setup ━━━
+          if [ -f "plugins/playit-gg/config.yml" ]; then
+            AGENT_SECRET=$(grep "agent-secret" plugins/playit-gg/config.yml | sed 's/.*: *"\?\([^"]*\)"\?/\1/' || true)
+            if [ -n "$AGENT_SECRET" ]; then
+              echo "║                                                                  ║"
+              echo "║  🔑 PLAYIT SECRET KEY (save this as GitHub Secret!):             ║"
+              echo "║     $AGENT_SECRET"
+              echo "║                                                                  ║"
+              echo "║  → Go to: GitHub Repo → Settings → Secrets → Actions             ║"
+              echo "║  → Add:   PLAYIT_SECRET = $AGENT_SECRET"
+              echo "║  → Then all future runs auto-connect (no claim needed!)          ║"
             fi
           fi
 
