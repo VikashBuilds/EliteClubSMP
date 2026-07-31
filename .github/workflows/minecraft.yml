@@ -232,9 +232,34 @@ jobs:
               echo "     - Type: UDP"
               echo "     - Local port: 24454"
               echo ""
-              echo "  3. Save the secret as GitHub Secret: PLAYIT_UDP_SECRET"
+              echo "  3. After claiming, the secret will be printed below."
+              echo "     Save it as GitHub Secret: PLAYIT_UDP_SECRET"
+              echo ""
+              echo "  Waiting 120s for you to claim the agent..."
+              sleep 120
+            fi
+
+            # Print the secret so user can copy it from logs
+            echo ""
+            echo "========================================================"
+            echo "  PLAYIT UDP SECRET — COPY THIS ENTIRE BLOCK:"
+            echo "========================================================"
+            if [ -f "$HOME/.config/playit_gg/playit.toml" ]; then
+              cat "$HOME/.config/playit_gg/playit.toml"
+            elif [ -f "/tmp/playit-runtime/playit.toml" ]; then
+              cat "/tmp/playit-runtime/playit.toml"
+            else
+              echo "  Secret file not found. Searching..."
+              find /tmp /home -name "playit.toml" -o -name "*.toml" 2>/dev/null | head -5
+              for f in $(find /tmp /home -name "playit.toml" 2>/dev/null | head -1); do
+                echo "  Found at: $f"
+                cat "$f"
+              done
             fi
             echo ""
+            echo "========================================================"
+            echo "  ^ Copy everything above between the lines ^"
+            echo "  Save as GitHub Secret: PLAYIT_UDP_SECRET"
             echo "========================================================"
           fi
       - name: Setup SFTP / SSH Server (Permanent Key)
