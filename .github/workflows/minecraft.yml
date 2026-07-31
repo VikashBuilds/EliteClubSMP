@@ -154,29 +154,24 @@ jobs:
       - name: Start playit.gg UDP Agent (Voice Chat Tunnel)
         env:
           PLAYIT_UDP_SECRET: ${{ secrets.PLAYIT_UDP_SECRET }}
+          XDG_RUNTIME_DIR: /tmp/playit-runtime
         run: |
           echo "--- Starting playit.gg CLI agent for Voice Chat UDP tunnel..."
 
-          # Create required directories for playit daemon
-          RUNNER_UID=$(id -u)
-          sudo mkdir -p /run/user/$RUNNER_UID
-          sudo chown $USER:$USER /run/user/$RUNNER_UID
+          # Create directories playit daemon needs
+          mkdir -p /tmp/playit-runtime
           mkdir -p ~/.config/playit_gg
 
           if [ -n "$PLAYIT_UDP_SECRET" ]; then
-            # Write the secret key for auto-login
             echo "$PLAYIT_UDP_SECRET" > ~/.config/playit_gg/playit.toml
             echo "  Using saved playit UDP secret"
 
-            # Start playit agent in background
-            playit > /tmp/playit_udp.log 2>&1 &
+            XDG_RUNTIME_DIR=/tmp/playit-runtime playit > /tmp/playit_udp.log 2>&1 &
             sleep 10
 
             echo "  playit UDP agent started"
             tail -5 /tmp/playit_udp.log || true
-            echo ""
             echo "  Voice chat UDP tunnel should be active."
-            echo "  Players need the Simple Voice Chat mod."
           else
             echo ""
             echo "========================================================"
@@ -184,18 +179,16 @@ jobs:
             echo "========================================================"
             echo ""
 
-            # Start playit — it will generate a claim URL
-            playit > /tmp/playit_udp.log 2>&1 &
+            XDG_RUNTIME_DIR=/tmp/playit-runtime playit > /tmp/playit_udp.log 2>&1 &
             PLAYIT_PID=$!
 
-            # Wait longer for claim URL to appear
-            for i in 1 2 3 4 5 6; do
+            for i in 1 2 3 4 5 6 7 8 9 10; do
               sleep 5
-              CLAIM_URL=$(grep -oE "https://playit\.(gg|io)/claim/[a-zA-Z0-9_-]+" /tmp/playit_udp.log | head -1 || true)
+              CLAIM_URL=$(grep -oE "https://[a-zA-Z0-9./-]*claim[a-zA-Z0-9./_-]*" /tmp/playit_udp.log | head -1 || true)
               if [ -n "$CLAIM_URL" ]; then
                 break
               fi
-              echo "  Waiting for claim URL (attempt $i/6)..."
+              echo "  Waiting for claim URL (attempt $i/10)..."
             done
 
             if [ -n "$CLAIM_URL" ]; then
@@ -207,9 +200,8 @@ jobs:
               echo "     - Type: UDP"
               echo "     - Local port: 24454"
               echo ""
-              echo "  3. Copy the secret from:"
-              echo "     ~/.config/playit_gg/playit.toml"
-              echo "     Save it as GitHub Secret: PLAYIT_UDP_SECRET"
+              echo "  3. Save the secret as GitHub Secret: PLAYIT_UDP_SECRET"
+              echo "     (find it at ~/.config/playit_gg/playit.toml)"
             else
               echo "  Playit agent log:"
               cat /tmp/playit_udp.log || true
