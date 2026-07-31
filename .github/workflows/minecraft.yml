@@ -383,28 +383,35 @@ jobs:
           echo "╚══════════════════════════════════════════════════════════════════╝"
           echo ""
 
-          # ━━━ Periodic backup loop ━━━
+          # ━━━ Periodic backup loop (every 10 min) ━━━
           RUNTIME=19800  # 5 hours 30 minutes
           ELAPSED=0
-          BACKUP_INTERVAL=1800  # 30 minutes
+          BACKUP_INTERVAL=600  # 10 minutes
 
           while [ $ELAPSED -lt $RUNTIME ]; do
             sleep $BACKUP_INTERVAL
             ELAPSED=$((ELAPSED + BACKUP_INTERVAL))
             HOURS=$((ELAPSED / 3600))
             MINS=$(((ELAPSED % 3600) / 60))
-            echo "⏰ Uptime: ${HOURS}h ${MINS}m — Performing 30-minute backup..."
-            bash scripts/backup.sh || echo "⚠️ Backup warning."
+            echo "--- Uptime: ${HOURS}h ${MINS}m — Saving & backing up..."
+
+            # Flush ALL player data from RAM to disk before backup
+            echo "save-all" > /tmp/mc_cmd 2>/dev/null || true
+            sleep 5  # Wait for save to complete
+
+            bash scripts/backup.sh || echo "WARNING: Backup had issues."
           done
 
-          echo "⚠️ 5h 30m reached. Graceful shutdown..."
+          echo "--- 5h 30m reached. Graceful shutdown..."
+          echo "save-all" > /tmp/mc_cmd 2>/dev/null || true
+          sleep 5
           echo "stop" > /tmp/mc_cmd 2>/dev/null || kill -SIGTERM $SERVER_PID 2>/dev/null || true
           sleep 15
 
-          echo "📦 Final backup to Cloudflare R2..."
+          echo "--- Final backup to Cloudflare R2..."
           bash scripts/backup.sh
 
-          echo "✅ Graceful shutdown completed!"
+          echo "--- Graceful shutdown completed!"
 
       - name: Trigger Next Run (Infinite 24/7 Chain)
         if: always()
