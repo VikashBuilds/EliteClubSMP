@@ -52,6 +52,12 @@ jobs:
           curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
           chmod +x /usr/local/bin/cloudflared
 
+          # Install playit CLI agent (for UDP tunnels — voice chat)
+          echo "--- Installing playit.gg CLI agent..."
+          curl -sL https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-linux-amd64 -o /usr/local/bin/playit
+          chmod +x /usr/local/bin/playit
+          playit version || echo "playit CLI install: will verify later"
+
           chmod +x scripts/*.sh
 
       - name: Restore World & Server Files from Cloudflare R2
@@ -145,6 +151,61 @@ jobs:
             echo "  Fresh voice chat config created (port 24454 UDP)"
           fi
 
+      - name: Start playit.gg UDP Agent (Voice Chat Tunnel)
+        env:
+          PLAYIT_UDP_SECRET: ${{ secrets.PLAYIT_UDP_SECRET }}
+        run: |
+          echo "--- Starting playit.gg CLI agent for Voice Chat UDP tunnel..."
+
+          # Create playit config directory
+          mkdir -p /tmp/playit-udp
+
+          if [ -n "$PLAYIT_UDP_SECRET" ]; then
+            # Write the secret key for auto-login
+            echo "$PLAYIT_UDP_SECRET" > /tmp/playit-udp/playit.toml
+            echo "  Using saved playit UDP secret"
+
+            # Start playit agent in background
+            playit --secret_path /tmp/playit-udp/playit.toml > /tmp/playit_udp.log 2>&1 &
+            sleep 10
+
+            echo "  playit UDP agent started (check logs for tunnel address)"
+            echo ""
+            echo "  The voice chat UDP tunnel should be active."
+            echo "  Players need the Simple Voice Chat mod to use it."
+          else
+            echo ""
+            echo "========================================================"
+            echo "  VOICE CHAT UDP TUNNEL — FIRST-TIME SETUP REQUIRED"
+            echo "========================================================"
+            echo ""
+            echo "  Starting playit agent for first-time claim..."
+            echo ""
+
+            # Start playit in claim mode — user needs to visit the URL
+            playit > /tmp/playit_udp.log 2>&1 &
+            PLAYIT_PID=$!
+            sleep 10
+
+            # Extract the claim URL from logs
+            CLAIM_URL=$(grep -oE "https://playit.gg/claim/[a-zA-Z0-9_-]+" /tmp/playit_udp.log | head -1 || true)
+            if [ -n "$CLAIM_URL" ]; then
+              echo "  1. Visit this URL to claim your UDP agent:"
+              echo "     $CLAIM_URL"
+              echo ""
+              echo "  2. In playit.gg dashboard, add a UDP tunnel:"
+              echo "     - Protocol: UDP"
+              echo "     - Local port: 24454"
+              echo ""
+              echo "  3. After claiming, find the secret in /tmp/playit-udp/"
+              echo "     and save it as GitHub Secret: PLAYIT_UDP_SECRET"
+            else
+              echo "  Could not find claim URL. Check /tmp/playit_udp.log"
+              tail -20 /tmp/playit_udp.log || true
+            fi
+            echo ""
+            echo "========================================================"
+          fi
       - name: Setup SFTP / SSH Server (Permanent Key)
         env:
           SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
