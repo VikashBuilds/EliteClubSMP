@@ -154,24 +154,41 @@ jobs:
       - name: Start playit.gg UDP Agent (Voice Chat Tunnel)
         env:
           PLAYIT_UDP_SECRET: ${{ secrets.PLAYIT_UDP_SECRET }}
-          XDG_RUNTIME_DIR: /tmp/playit-runtime
         run: |
           echo "--- Starting playit.gg CLI agent for Voice Chat UDP tunnel..."
 
-          # Create directories playit daemon needs
+          # Create required directories
           mkdir -p /tmp/playit-runtime
           mkdir -p ~/.config/playit_gg
+
+          # Test if playit works with --socket_path
+          PLAYIT_SOCK="/tmp/playit-runtime/playit.sock"
 
           if [ -n "$PLAYIT_UDP_SECRET" ]; then
             echo "$PLAYIT_UDP_SECRET" > ~/.config/playit_gg/playit.toml
             echo "  Using saved playit UDP secret"
 
-            XDG_RUNTIME_DIR=/tmp/playit-runtime playit > /tmp/playit_udp.log 2>&1 &
-            sleep 10
+            playit --socket_path "$PLAYIT_SOCK" > /tmp/playit_udp.log 2>&1 &
+            sleep 5
 
-            echo "  playit UDP agent started"
-            tail -5 /tmp/playit_udp.log || true
-            echo "  Voice chat UDP tunnel should be active."
+            # Check if it started or errored
+            if grep -q "error" /tmp/playit_udp.log 2>/dev/null; then
+              echo "  playit --socket_path failed, trying playitd directly..."
+              kill %1 2>/dev/null || true
+              playitd --socket_path "$PLAYIT_SOCK" > /tmp/playit_udp.log 2>&1 &
+              sleep 5
+            fi
+
+            # Final fallback: run without daemon mode if available
+            if grep -q "error" /tmp/playit_udp.log 2>/dev/null; then
+              echo "  playitd also failed, trying legacy single-process mode..."
+              kill %1 2>/dev/null || true
+              # Download older playit version that doesn't need daemon
+              curl -sL "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-linux-amd64" -o /tmp/playit-legacy
+              chmod +x /tmp/playit-legacy
+              /tmp/playit-legacy > /tmp/playit_udp.log 2>&1 &
+              sleep 10
+            fi
           else
             echo ""
             echo "========================================================"
@@ -179,9 +196,20 @@ jobs:
             echo "========================================================"
             echo ""
 
-            XDG_RUNTIME_DIR=/tmp/playit-runtime playit > /tmp/playit_udp.log 2>&1 &
-            PLAYIT_PID=$!
+            # Try playit with socket path first
+            playit --socket_path "$PLAYIT_SOCK" > /tmp/playit_udp.log 2>&1 &
+            sleep 5
 
+            # If it errored, try fallbacks
+            if grep -q "error" /tmp/playit_udp.log 2>/dev/null; then
+              echo "  v1.x daemon failed, downloading legacy v0.15..."
+              kill %1 2>/dev/null || true
+              curl -sL "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-linux-amd64" -o /tmp/playit-legacy
+              chmod +x /tmp/playit-legacy
+              /tmp/playit-legacy > /tmp/playit_udp.log 2>&1 &
+            fi
+
+            # Wait for claim URL
             for i in 1 2 3 4 5 6 7 8 9 10; do
               sleep 5
               CLAIM_URL=$(grep -oE "https://[a-zA-Z0-9./-]*claim[a-zA-Z0-9./_-]*" /tmp/playit_udp.log | head -1 || true)
@@ -191,8 +219,12 @@ jobs:
               echo "  Waiting for claim URL (attempt $i/10)..."
             done
 
+            echo ""
+            echo "  playit agent log:"
+            tail -20 /tmp/playit_udp.log || true
+            echo ""
+
             if [ -n "$CLAIM_URL" ]; then
-              echo ""
               echo "  1. Visit this URL to claim your UDP agent:"
               echo "     $CLAIM_URL"
               echo ""
@@ -201,10 +233,6 @@ jobs:
               echo "     - Local port: 24454"
               echo ""
               echo "  3. Save the secret as GitHub Secret: PLAYIT_UDP_SECRET"
-              echo "     (find it at ~/.config/playit_gg/playit.toml)"
-            else
-              echo "  Playit agent log:"
-              cat /tmp/playit_udp.log || true
             fi
             echo ""
             echo "========================================================"
