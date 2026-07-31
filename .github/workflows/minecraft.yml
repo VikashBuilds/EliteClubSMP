@@ -52,12 +52,6 @@ jobs:
           curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
           chmod +x /usr/local/bin/cloudflared
 
-          # Install playit CLI agent (for UDP tunnels — voice chat)
-          echo "--- Installing playit.gg CLI agent..."
-          curl -sL https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-linux-amd64 -o /usr/local/bin/playit
-          chmod +x /usr/local/bin/playit
-          playit version || echo "playit CLI install: will verify later"
-
           chmod +x scripts/*.sh
 
       - name: Restore World & Server Files from Cloudflare R2
@@ -155,110 +149,54 @@ jobs:
         env:
           PLAYIT_UDP_SECRET: ${{ secrets.PLAYIT_UDP_SECRET }}
         run: |
-          echo "--- Starting playit.gg CLI agent for Voice Chat UDP tunnel..."
+          echo "--- Starting playit.gg UDP agent for Voice Chat..."
 
-          # Create required directories
-          mkdir -p /tmp/playit-runtime
+          # Always use legacy v0.15 (v1.x daemon doesn't work on GitHub Actions)
+          echo "  Downloading playit agent v0.15..."
+          curl -sL "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-linux-amd64" -o /tmp/playit-agent
+          chmod +x /tmp/playit-agent
+
           mkdir -p ~/.config/playit_gg
-
-          # Test if playit works with --socket_path
-          PLAYIT_SOCK="/tmp/playit-runtime/playit.sock"
 
           if [ -n "$PLAYIT_UDP_SECRET" ]; then
             echo "$PLAYIT_UDP_SECRET" > ~/.config/playit_gg/playit.toml
-            echo "  Using saved playit UDP secret"
+            echo "  Loaded saved secret, starting agent..."
 
-            playit --socket_path "$PLAYIT_SOCK" > /tmp/playit_udp.log 2>&1 &
-            sleep 5
+            /tmp/playit-agent > /tmp/playit_udp.log 2>&1 &
+            sleep 10
 
-            # Check if it started or errored
-            if grep -q "error" /tmp/playit_udp.log 2>/dev/null; then
-              echo "  playit --socket_path failed, trying playitd directly..."
-              kill %1 2>/dev/null || true
-              playitd --socket_path "$PLAYIT_SOCK" > /tmp/playit_udp.log 2>&1 &
-              sleep 5
-            fi
-
-            # Final fallback: run without daemon mode if available
-            if grep -q "error" /tmp/playit_udp.log 2>/dev/null; then
-              echo "  playitd also failed, trying legacy single-process mode..."
-              kill %1 2>/dev/null || true
-              # Download older playit version that doesn't need daemon
-              curl -sL "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-linux-amd64" -o /tmp/playit-legacy
-              chmod +x /tmp/playit-legacy
-              /tmp/playit-legacy > /tmp/playit_udp.log 2>&1 &
-              sleep 10
-            fi
+            echo "  playit UDP agent running!"
+            tail -5 /tmp/playit_udp.log || true
           else
             echo ""
             echo "========================================================"
-            echo "  VOICE CHAT UDP TUNNEL — FIRST-TIME SETUP"
+            echo "  FIRST-TIME SETUP — Voice Chat UDP Tunnel"
             echo "========================================================"
+
+            /tmp/playit-agent > /tmp/playit_udp.log 2>&1 &
+            sleep 15
+
+            echo "  Agent log:"
+            cat /tmp/playit_udp.log || true
             echo ""
+            echo "  If you see a claim URL above, visit it and add a UDP tunnel (port 24454)."
+            echo "  Then wait 120s for the secret to be printed..."
+            sleep 120
 
-            # Try playit with socket path first
-            playit --socket_path "$PLAYIT_SOCK" > /tmp/playit_udp.log 2>&1 &
-            sleep 5
-
-            # If it errored, try fallbacks
-            if grep -q "error" /tmp/playit_udp.log 2>/dev/null; then
-              echo "  v1.x daemon failed, downloading legacy v0.15..."
-              kill %1 2>/dev/null || true
-              curl -sL "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-linux-amd64" -o /tmp/playit-legacy
-              chmod +x /tmp/playit-legacy
-              /tmp/playit-legacy > /tmp/playit_udp.log 2>&1 &
-            fi
-
-            # Wait for claim URL
-            for i in 1 2 3 4 5 6 7 8 9 10; do
-              sleep 5
-              CLAIM_URL=$(grep -oE "https://[a-zA-Z0-9./-]*claim[a-zA-Z0-9./_-]*" /tmp/playit_udp.log | head -1 || true)
-              if [ -n "$CLAIM_URL" ]; then
-                break
-              fi
-              echo "  Waiting for claim URL (attempt $i/10)..."
-            done
-
-            echo ""
-            echo "  playit agent log:"
-            tail -20 /tmp/playit_udp.log || true
-            echo ""
-
-            if [ -n "$CLAIM_URL" ]; then
-              echo "  1. Visit this URL to claim your UDP agent:"
-              echo "     $CLAIM_URL"
-              echo ""
-              echo "  2. In playit.gg dashboard, add a tunnel:"
-              echo "     - Type: UDP"
-              echo "     - Local port: 24454"
-              echo ""
-              echo "  3. After claiming, the secret will be printed below."
-              echo "     Save it as GitHub Secret: PLAYIT_UDP_SECRET"
-              echo ""
-              echo "  Waiting 120s for you to claim the agent..."
-              sleep 120
-            fi
-
-            # Print the secret so user can copy it from logs
+            # Print the secret
             echo ""
             echo "========================================================"
             echo "  PLAYIT UDP SECRET — COPY THIS ENTIRE BLOCK:"
             echo "========================================================"
             if [ -f "$HOME/.config/playit_gg/playit.toml" ]; then
               cat "$HOME/.config/playit_gg/playit.toml"
-            elif [ -f "/tmp/playit-runtime/playit.toml" ]; then
-              cat "/tmp/playit-runtime/playit.toml"
             else
-              echo "  Secret file not found. Searching..."
-              find /tmp /home -name "playit.toml" -o -name "*.toml" 2>/dev/null | head -5
-              for f in $(find /tmp /home -name "playit.toml" 2>/dev/null | head -1); do
-                echo "  Found at: $f"
+              find /tmp /home -name "playit.toml" 2>/dev/null | while read f; do
+                echo "  Found: $f"
                 cat "$f"
               done
             fi
-            echo ""
             echo "========================================================"
-            echo "  ^ Copy everything above between the lines ^"
             echo "  Save as GitHub Secret: PLAYIT_UDP_SECRET"
             echo "========================================================"
           fi
