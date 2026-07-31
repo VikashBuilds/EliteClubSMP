@@ -101,28 +101,41 @@ jobs:
 
           echo "✅ Server configuration ready!"
 
-      - name: Setup SFTP / SSH Server (Key-Based Auth)
+      - name: Setup SFTP / SSH Server (Permanent Key)
+        env:
+          SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
         run: |
-          echo "🔐 Setting up SSH/SFTP Server with Key-Based Auth..."
+          echo "🔐 Setting up SSH/SFTP Server..."
           SERVER_DIR="$(pwd)"
 
-          # ━━━ Step 1: Generate SSH Key Pair ━━━
-          echo "  → Generating SSH key pair..."
-          ssh-keygen -t ed25519 -f /tmp/mc_sftp_key -N "" -q -C "minecraft-sftp"
-
-          # ━━━ Step 2: Add public key to authorized_keys ━━━
+          # ━━━ Step 1: Add your permanent public key to authorized_keys ━━━
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          cat /tmp/mc_sftp_key.pub >> ~/.ssh/authorized_keys
-          chmod 600 ~/.ssh/authorized_keys
-          echo "  ✅ SSH key pair generated and authorized"
 
-          # ━━━ Step 3: Enable SSH and configure sshd ━━━
+          if [ -n "$SSH_PUBLIC_KEY" ]; then
+            echo "$SSH_PUBLIC_KEY" > ~/.ssh/authorized_keys
+            chmod 600 ~/.ssh/authorized_keys
+            echo "  ✅ Your permanent SSH public key loaded from GitHub Secrets"
+          else
+            echo ""
+            echo "╔══════════════════════════════════════════════════════════════════╗"
+            echo "║  ❌ SSH_PUBLIC_KEY secret not set — SFTP will NOT work!         ║"
+            echo "║                                                                  ║"
+            echo "║  ONE-TIME SETUP:                                                 ║"
+            echo "║  1. Go to: GitHub Repo → Settings → Secrets → Actions            ║"
+            echo "║  2. Add secret: SSH_PUBLIC_KEY                                   ║"
+            echo "║  3. Value: (your public key — check the SETUP_GUIDE.md)          ║"
+            echo "║  4. All runs will use the SAME key — FileZilla works forever!   ║"
+            echo "╚══════════════════════════════════════════════════════════════════╝"
+            echo ""
+          fi
+
+          # ━━━ Step 2: Enable SSH and configure sshd ━━━
           echo "  → Configuring SSH daemon..."
           SSHD_CONFIG="/etc/ssh/sshd_config"
           sudo cp "$SSHD_CONFIG" "${SSHD_CONFIG}.bak" 2>/dev/null || true
 
-          # Enable pubkey auth (should already be enabled, but make sure)
+          # Enable pubkey auth
           sudo sed -i '' 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' "$SSHD_CONFIG"
           grep -q "^PubkeyAuthentication yes" "$SSHD_CONFIG" || echo "PubkeyAuthentication yes" | sudo tee -a "$SSHD_CONFIG" > /dev/null
 
@@ -143,25 +156,6 @@ jobs:
             sleep 2
           fi
 
-          # ━━━ Step 4: Print Private Key for FileZilla ━━━
-          echo ""
-          echo "╔══════════════════════════════════════════════════════════════════╗"
-          echo "║  🔑 SSH PRIVATE KEY — Save this to a file for FileZilla!       ║"
-          echo "╠══════════════════════════════════════════════════════════════════╣"
-          echo "║  Copy everything between BEGIN and END (including those lines)  ║"
-          echo "║  Save it as:  mc_sftp_key  (no extension)                      ║"
-          echo "╚══════════════════════════════════════════════════════════════════╝"
-          echo ""
-          cat /tmp/mc_sftp_key
-          echo ""
-          echo "╔══════════════════════════════════════════════════════════════════╗"
-          echo "║  ✅ KEY PRINTED ABOVE — Copy and save to a file!               ║"
-          echo "╚══════════════════════════════════════════════════════════════════╝"
-          echo ""
-
-          # Also save the key in the server directory for download via file manager
-          cp /tmp/mc_sftp_key "$SERVER_DIR/sftp_private_key.txt"
-          echo "  ℹ️ Key also saved to: $SERVER_DIR/sftp_private_key.txt"
           echo "  ✅ SFTP ready! User: $USER | Dir: $SERVER_DIR"
 
       - name: Start SFTP Tunnel (bore → FileZilla)
